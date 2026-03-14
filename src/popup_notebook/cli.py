@@ -19,7 +19,9 @@ console = Console()
 @app.command()
 def status(cwd: Path = typer.Option(Path.cwd(), "--cwd", help="Working directory to inspect.")) -> None:
     """Show the resolved project and interpreter."""
+    manager = SessionManager()
     context = build_project_context(cwd)
+    session_status = manager.status(context.project_root)
     table = Table(title="popup-notebook status")
     table.add_column("Field")
     table.add_column("Value", overflow="fold")
@@ -27,6 +29,11 @@ def status(cwd: Path = typer.Option(Path.cwd(), "--cwd", help="Working directory
     table.add_row("project root", str(context.project_root))
     table.add_row("interpreter", str(context.interpreter))
     table.add_row("interpreter source", context.interpreter_source)
+    table.add_row("session exists", str(session_status["exists"]))
+    table.add_row("session attached", str(session_status["attached"]))
+    table.add_row("kernel generation", str(session_status["kernel_generation"]))
+    table.add_row("cell count", str(session_status["cell_count"]))
+    table.add_row("state path", str(session_status["state_path"]))
     console.print(table)
 
 
@@ -57,8 +64,10 @@ def reset(cwd: Path = typer.Option(Path.cwd(), "--cwd", help="Working directory 
     """Restart kernel state while preserving notebook structure."""
     manager = SessionManager()
     context = build_project_context(cwd)
-    manager.reset(context.project_root)
-    console.print(f"Reset kernel state for {context.project_root}")
+    if manager.reset(context.project_root):
+        console.print(f"Reset kernel state for {context.project_root}")
+        return
+    console.print(f"No existing session for {context.project_root}")
 
 
 @app.command("hard-reset")
@@ -66,8 +75,10 @@ def hard_reset(cwd: Path = typer.Option(Path.cwd(), "--cwd", help="Working direc
     """Clear notebook contents and recreate a blank notebook."""
     manager = SessionManager()
     context = build_project_context(cwd)
-    manager.hard_reset(context.project_root)
-    console.print(f"Hard-reset notebook state for {context.project_root}")
+    if manager.hard_reset(context.project_root):
+        console.print(f"Hard-reset notebook state for {context.project_root}")
+        return
+    console.print(f"No existing session for {context.project_root}")
 
 
 @app.command()
@@ -75,5 +86,7 @@ def kill(cwd: Path = typer.Option(Path.cwd(), "--cwd", help="Working directory t
     """Destroy the current project session."""
     manager = SessionManager()
     context = build_project_context(cwd)
-    manager.kill(context.project_root)
-    console.print(f"Killed session for {context.project_root}")
+    if manager.kill(context.project_root):
+        console.print(f"Killed session for {context.project_root}")
+        return
+    console.print(f"No existing session for {context.project_root}")

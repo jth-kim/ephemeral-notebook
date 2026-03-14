@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from popup_notebook.project import build_project_context
-from popup_notebook.sessions.manager import SessionManager
+from popup_notebook.sessions.manager import SessionAttachedError, SessionManager
 
 
 def run_tui(cwd: Path) -> None:
@@ -18,7 +18,11 @@ def run_tui(cwd: Path) -> None:
         ) from exc
 
     context = build_project_context(cwd)
-    session = SessionManager().get_or_create(cwd)
+    manager = SessionManager()
+    try:
+        session, attachment_token = manager.attach(cwd)
+    except SessionAttachedError as exc:
+        raise RuntimeError(str(exc)) from exc
 
     class PopupNotebookApp(App[None]):
         BINDINGS = [("q", "quit", "Hide")]
@@ -38,4 +42,7 @@ def run_tui(cwd: Path) -> None:
                     )
             yield Footer()
 
-    PopupNotebookApp().run()
+    try:
+        PopupNotebookApp().run()
+    finally:
+        manager.detach(context.project_root, attachment_token)

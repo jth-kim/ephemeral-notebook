@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import shlex
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -20,7 +21,12 @@ def in_tmux() -> bool:
 
 
 def tmux_popup_command(cwd: Path, geometry: PopupGeometry) -> list[str]:
-    command = shlex.join(["popup-notebook", "ui", "--cwd", str(cwd)])
+    command_parts: list[str] = []
+    python_path = os.environ.get("PYTHONPATH")
+    if python_path:
+        command_parts.extend(["env", f"PYTHONPATH={python_path}"])
+    command_parts.extend([sys.executable, "-m", "popup_notebook.cli", "ui", "--cwd", str(cwd)])
+    command = shlex.join(command_parts)
     return [
         "tmux",
         "popup",

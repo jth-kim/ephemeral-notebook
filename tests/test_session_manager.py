@@ -146,6 +146,38 @@ class SessionManagerTests(unittest.TestCase):
                     manager.detach(project.resolve(), token)
                     manager.kill(project.resolve())
 
+    def test_cell_mutation_and_execution_round_trip(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            project, _python = self._make_project(root, real_python=True)
+
+            with patch.dict("os.environ", {"XDG_STATE_HOME": str(root / "state")}):
+                with self._patched_context(project):
+                    manager = SessionManager()
+                    session, token = manager.attach(project)
+                    cell_id = session.cells[0].id
+
+                    self.assertTrue(manager.update_cell_source(project.resolve(), cell_id, "1 + 1"))
+                    executed = manager.execute_cell(project.resolve(), cell_id)
+
+                    self.assertIsNotNone(executed)
+                    assert executed is not None
+                    self.assertIn("2", executed.output)
+
+                    inserted = manager.insert_cell_after(project.resolve(), cell_id)
+                    self.assertIsNotNone(inserted)
+                    assert inserted is not None
+                    self.assertTrue(manager.set_cell_kind(project.resolve(), inserted.id, "markdown"))
+
+                    updated = manager.get(project.resolve())
+                    self.assertIsNotNone(updated)
+                    assert updated is not None
+                    self.assertEqual(len(updated.cells), 2)
+                    self.assertEqual(updated.cells[1].kind, "markdown")
+
+                    manager.detach(project.resolve(), token)
+                    manager.kill(project.resolve())
+
     def test_kill_removes_session(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

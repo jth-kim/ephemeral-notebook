@@ -6,6 +6,7 @@ import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from queue import Empty
 from typing import Final
 
 from popup_notebook.sessions.store import session_connection_path, session_log_path, session_store_dir
@@ -108,6 +109,60 @@ class KernelController:
         if connection_file is not None and connection_file.exists():
             connection_file.unlink()
 
+    def execute(self, connection_file: Path, code: str) -> str:
+        from jupyter_client import BlockingKernelClient
+
+        client = BlockingKernelClient(connection_file=str(connection_file))
+        client.load_connection_file()
+        client.start_channels()
+        try:
+            client.wait_for_ready(timeout=STARTUP_TIMEOUT)
+            message_id = client.execute(code, store_history=True, stop_on_error=True)
+            outputs: list[str] = []
+
+            while True:
+                message = client.get_iopub_msg(timeout=STARTUP_TIMEOUT)
+                if message.get("parent_header", {}).get("msg_id") != message_id:
+                    continue
+
+                msg_type = message["msg_type"]
+                content = message["content"]
+
+                if msg_type == "stream":
+                    text = str(content.get("text", "")).rstrip()
+                    if text:
+                        outputs.append(text)
+                elif msg_type in {"execute_result", "display_data"}:
+                    rendered = self._render_output_data(content.get("data", {}))
+                    if rendered:
+                        outputs.append(rendered)
+                elif msg_type == "error":
+                    traceback = content.get("traceback", [])
+                    if traceback:
+                        outputs.append("\n".join(str(line) for line in traceback))
+                    else:
+                        outputs.append(
+                            f"{content.get('ename', 'Error')}: {content.get('evalue', '')}".rstrip()
+                        )
+                elif msg_type == "status" and content.get("execution_state") == "idle":
+                    break
+
+            try:
+                reply = client.get_shell_msg(timeout=STARTUP_TIMEOUT)
+            except Empty:
+                reply = None
+
+            if reply is not None:
+                content = reply.get("content", {})
+                if content.get("status") == "error" and not outputs:
+                    outputs.append(
+                        f"{content.get('ename', 'Error')}: {content.get('evalue', '')}".rstrip()
+                    )
+
+            return "\n\n".join(part for part in outputs if part).strip()
+        finally:
+            client.stop_channels()
+
     @staticmethod
     def is_alive(pid: int) -> bool:
         try:
@@ -142,3 +197,15 @@ class KernelController:
                 return
         except ProcessLookupError:
             return
+
+    @staticmethod
+    def _render_output_data(data: object) -> str:
+        if not isinstance(data, dict):
+            return ""
+        if "text/plain" in data:
+            return str(data["text/plain"]).rstrip()
+        if "text/markdown" in data:
+            return str(data["text/markdown"]).rstrip()
+        if "text/html" in data:
+            return str(data["text/html"]).rstrip()
+        return ""

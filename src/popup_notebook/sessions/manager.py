@@ -5,7 +5,7 @@ from uuid import uuid4
 
 from popup_notebook.project import build_project_context
 from popup_notebook.sessions.kernel import KernelController
-from popup_notebook.sessions.models import Cell, SessionState
+from popup_notebook.sessions.models import Cell, CellKind, SessionState
 from popup_notebook.sessions.store import (
     delete_session_state,
     load_session_state,
@@ -124,6 +124,79 @@ class SessionManager:
             session.attachment_token = None
             save_session_state(session)
 
+    def update_cell_source(self, project_root: Path, cell_id: str, source: str) -> bool:
+        with session_lock(project_root):
+            session = load_session_state(project_root)
+            if session is None:
+                return False
+            cell = self._find_cell(session, cell_id)
+            if cell is None:
+                return False
+            cell.source = source
+            save_session_state(session)
+            return True
+
+    def set_cell_kind(self, project_root: Path, cell_id: str, kind: CellKind) -> bool:
+        with session_lock(project_root):
+            session = load_session_state(project_root)
+            if session is None:
+                return False
+            cell = self._find_cell(session, cell_id)
+            if cell is None:
+                return False
+            cell.kind = kind
+            if kind == "markdown":
+                cell.output = ""
+            save_session_state(session)
+            return True
+
+    def insert_cell_before(
+        self,
+        project_root: Path,
+        reference_cell_id: str | None,
+        kind: CellKind = "python",
+    ) -> Cell | None:
+        return self._insert_cell(project_root, reference_cell_id, kind, before=True)
+
+    def insert_cell_after(
+        self,
+        project_root: Path,
+        reference_cell_id: str | None,
+        kind: CellKind = "python",
+    ) -> Cell | None:
+        return self._insert_cell(project_root, reference_cell_id, kind, before=False)
+
+    def execute_cell(self, project_root: Path, cell_id: str) -> Cell | None:
+        with session_lock(project_root):
+            session = load_session_state(project_root)
+            if session is None:
+                return None
+            cell = self._find_cell(session, cell_id)
+            if cell is None:
+                return None
+            if session.connection_file is None:
+                return None
+            source = cell.source
+            kind = cell.kind
+            controller = self._controller(session)
+            connection_file = session.connection_file
+
+        if kind == "markdown":
+            output = ""
+        else:
+            output = controller.execute(connection_file, source)
+
+        with session_lock(project_root):
+            session = load_session_state(project_root)
+            if session is None:
+                return None
+            cell = self._find_cell(session, cell_id)
+            if cell is None:
+                return None
+            cell.output = output
+            save_session_state(session)
+            return cell
+
     def reset(self, project_root: Path) -> bool:
         with session_lock(project_root):
             session = load_session_state(project_root)
@@ -198,3 +271,40 @@ class SessionManager:
     @staticmethod
     def _controller(session: SessionState) -> KernelController:
         return KernelController(session.project_root, session.interpreter)
+
+    @staticmethod
+    def _find_cell(session: SessionState, cell_id: str) -> Cell | None:
+        for cell in session.cells:
+            if cell.id == cell_id:
+                return cell
+        return None
+
+    def _insert_cell(
+        self,
+        project_root: Path,
+        reference_cell_id: str | None,
+        kind: CellKind,
+        *,
+        before: bool,
+    ) -> Cell | None:
+        with session_lock(project_root):
+            session = load_session_state(project_root)
+            if session is None:
+                return None
+
+            new_cell = Cell(id=str(uuid4()), kind=kind)
+            if not session.cells or reference_cell_id is None:
+                session.cells.append(new_cell)
+            else:
+                index = next(
+                    (position for position, cell in enumerate(session.cells) if cell.id == reference_cell_id),
+                    None,
+                )
+                if index is None:
+                    session.cells.append(new_cell)
+                else:
+                    insert_at = index if before else index + 1
+                    session.cells.insert(insert_at, new_cell)
+
+            save_session_state(session)
+            return new_cell

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from textual.widgets import Static
 
-class StatusBarWidget:
-    """Placeholder for a future Textual status bar widget."""
+
+class StatusBarWidget(Static):
+    """Status display for project, interpreter, and current cell context."""

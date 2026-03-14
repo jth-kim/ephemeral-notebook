@@ -1,0 +1,79 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import typer
+from rich.console import Console
+from rich.table import Table
+
+from popup_notebook.launcher import PopupGeometry, in_tmux, launch_tmux_popup
+from popup_notebook.project import build_project_context
+from popup_notebook.sessions.manager import SessionManager
+from popup_notebook.tui.app import run_tui
+
+
+app = typer.Typer(no_args_is_help=True, help="Notebook-like terminal scratchpad for Python.")
+console = Console()
+
+
+@app.command()
+def status(cwd: Path = typer.Option(Path.cwd(), "--cwd", help="Working directory to inspect.")) -> None:
+    """Show the resolved project and interpreter."""
+    context = build_project_context(cwd)
+    table = Table(title="popup-notebook status")
+    table.add_column("Field")
+    table.add_column("Value", overflow="fold")
+    table.add_row("cwd", str(context.cwd))
+    table.add_row("project root", str(context.project_root))
+    table.add_row("interpreter", str(context.interpreter))
+    table.add_row("interpreter source", context.interpreter_source)
+    console.print(table)
+
+
+@app.command()
+def open(
+    cwd: Path = typer.Option(Path.cwd(), "--cwd", help="Working directory to open from."),
+    width: str = typer.Option("80%", "--width", help="Popup width."),
+    height: str = typer.Option("80%", "--height", help="Popup height."),
+    x: str = typer.Option("C", "--x", help="Popup x position."),
+    y: str = typer.Option("C", "--y", help="Popup y position."),
+) -> None:
+    """Open the scratchpad UI, using a tmux popup when possible."""
+    geometry = PopupGeometry(width=width, height=height, x=x, y=y)
+    if in_tmux():
+        launch_tmux_popup(cwd.resolve(), geometry)
+        return
+    run_tui(cwd.resolve())
+
+
+@app.command("ui", hidden=True)
+def ui(cwd: Path = typer.Option(Path.cwd(), "--cwd", help="Working directory for the UI.")) -> None:
+    """Internal entrypoint for the TUI client."""
+    run_tui(cwd.resolve())
+
+
+@app.command()
+def reset(cwd: Path = typer.Option(Path.cwd(), "--cwd", help="Working directory to reset.")) -> None:
+    """Restart kernel state while preserving notebook structure."""
+    manager = SessionManager()
+    context = build_project_context(cwd)
+    manager.reset(context.project_root)
+    console.print(f"Reset kernel state for {context.project_root}")
+
+
+@app.command("hard-reset")
+def hard_reset(cwd: Path = typer.Option(Path.cwd(), "--cwd", help="Working directory to hard reset.")) -> None:
+    """Clear notebook contents and recreate a blank notebook."""
+    manager = SessionManager()
+    context = build_project_context(cwd)
+    manager.hard_reset(context.project_root)
+    console.print(f"Hard-reset notebook state for {context.project_root}")
+
+
+@app.command()
+def kill(cwd: Path = typer.Option(Path.cwd(), "--cwd", help="Working directory to kill.")) -> None:
+    """Destroy the current project session."""
+    manager = SessionManager()
+    context = build_project_context(cwd)
+    manager.kill(context.project_root)
+    console.print(f"Killed session for {context.project_root}")

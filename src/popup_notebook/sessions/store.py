@@ -23,6 +23,14 @@ def session_state_path(project_root: Path) -> Path:
     return session_store_dir(project_root) / "state.json"
 
 
+def session_connection_path(project_root: Path) -> Path:
+    return session_store_dir(project_root) / "kernel-connection.json"
+
+
+def session_log_path(project_root: Path) -> Path:
+    return session_store_dir(project_root) / "kernel.log"
+
+
 def ensure_state_dir() -> Path:
     root = state_dir()
     root.mkdir(parents=True, exist_ok=True)

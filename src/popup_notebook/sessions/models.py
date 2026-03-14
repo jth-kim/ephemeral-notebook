@@ -42,6 +42,8 @@ class SessionState:
     interpreter: Path
     interpreter_source: str
     kernel_generation: int = 1
+    kernel_pid: int | None = None
+    connection_file: Path | None = None
     attached: bool = False
     attachment_token: str | None = None
     cells: list[Cell] = field(default_factory=list)
@@ -52,6 +54,8 @@ class SessionState:
             "interpreter": str(self.interpreter),
             "interpreter_source": self.interpreter_source,
             "kernel_generation": self.kernel_generation,
+            "kernel_pid": self.kernel_pid,
+            "connection_file": str(self.connection_file) if self.connection_file else None,
             "attached": self.attached,
             "attachment_token": self.attachment_token,
             "cells": [cell.to_dict() for cell in self.cells],
@@ -66,6 +70,10 @@ class SessionState:
             interpreter=Path(str(data["interpreter"])),
             interpreter_source=str(data.get("interpreter_source", "unknown")),
             kernel_generation=int(data.get("kernel_generation", 1)),
+            kernel_pid=int(data["kernel_pid"]) if data.get("kernel_pid") is not None else None,
+            connection_file=(
+                Path(str(data["connection_file"])) if data.get("connection_file") is not None else None
+            ),
             attached=bool(data.get("attached", False)),
             attachment_token=(
                 str(data["attachment_token"]) if data.get("attachment_token") is not None else None

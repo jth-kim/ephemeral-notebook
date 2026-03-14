@@ -32,6 +32,9 @@ def status(cwd: Path = typer.Option(Path.cwd(), "--cwd", help="Working directory
     table.add_row("session exists", str(session_status["exists"]))
     table.add_row("session attached", str(session_status["attached"]))
     table.add_row("kernel generation", str(session_status["kernel_generation"]))
+    table.add_row("kernel alive", str(session_status["kernel_alive"]))
+    table.add_row("kernel pid", str(session_status["kernel_pid"]))
+    table.add_row("connection file", str(session_status["connection_file"]))
     table.add_row("cell count", str(session_status["cell_count"]))
     table.add_row("state path", str(session_status["state_path"]))
     console.print(table)
@@ -90,3 +93,7 @@ def kill(cwd: Path = typer.Option(Path.cwd(), "--cwd", help="Working directory t
         console.print(f"Killed session for {context.project_root}")
         return
     console.print(f"No existing session for {context.project_root}")
+
+
+if __name__ == "__main__":
+    app()

@@ -151,6 +151,18 @@ class SessionManager:
             save_session_state(session)
             return True
 
+    def toggle_cell_expanded(self, project_root: Path, cell_id: str) -> bool:
+        with session_lock(project_root):
+            session = load_session_state(project_root)
+            if session is None:
+                return False
+            cell = self._find_cell(session, cell_id)
+            if cell is None or not cell.output.strip():
+                return False
+            cell.expanded = not cell.expanded
+            save_session_state(session)
+            return True
+
     def insert_cell_before(
         self,
         project_root: Path,

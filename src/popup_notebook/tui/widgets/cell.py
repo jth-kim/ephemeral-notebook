@@ -45,6 +45,14 @@ class NotebookTextArea(TextArea):
             self.post_message(self.ExitEdit(self.cell_id))
             return
 
+        if event.key in {"ctrl+v", "super+v"}:
+            load_clipboard = getattr(self.app, "load_system_clipboard", None)
+            if callable(load_clipboard) and load_clipboard():
+                event.stop()
+                event.prevent_default()
+                self.action_paste()
+                return
+
         if event.key in RUN_STAY_KEYS:
             event.stop()
             event.prevent_default()
@@ -105,6 +113,8 @@ class CellWidget(VerticalGroup):
         current: bool = False,
         edit_mode: bool = False,
         markdown_center: bool = False,
+        output_max_lines: int = 12,
+        code_theme: str = "monokai",
     ) -> None:
         super().__init__(id=f"cell-{cell.id}", classes="cell")
         self.cell = cell
@@ -118,8 +128,10 @@ class CellWidget(VerticalGroup):
             tab_behavior="indent",
         )
         self._markdown = Markdown(cell.source, classes="cell-markdown-render")
-        self._output = Static(self._render_output(cell.output), classes="cell-output")
+        self._output = Static(classes="cell-output")
         self._markdown_center = markdown_center
+        self._output_max_lines = output_max_lines
+        self._editor.theme = code_theme if code_theme in self._editor.available_themes else "css"
         self.cell_kind = cell.kind
         self.is_current = current
         self.in_edit_mode = edit_mode
@@ -170,6 +182,8 @@ class CellWidget(VerticalGroup):
     def on_text_area_changed(self, event: TextArea.Changed) -> None:
         if event.text_area is not self._editor:
             return
+        if self.cell_kind == "markdown":
+            self._markdown.update(self._editor.text)
         self.post_message(self.SourceChanged(self.cell.id, self._editor.text))
         self.call_after_refresh(self._update_editor_height)
 
@@ -209,7 +223,7 @@ class CellWidget(VerticalGroup):
             self._editor.load_text(cell.source)
         self._editor.language = cell.kind if cell.kind in {"python", "markdown"} else None
         self._markdown.update(cell.source)
-        self._output.update(self._render_output(cell.output))
+        self._output.update(self._render_output())
         self.call_after_refresh(self._update_editor_height)
         self._refresh()
 
@@ -233,14 +247,32 @@ class CellWidget(VerticalGroup):
         self.set_class(self.cell_kind == "markdown", "markdown")
         self._markdown.set_class(self._markdown_center, "centered")
         self._output.display = bool(self.cell.output.strip())
-        self._output.border_title = " Output " if self._output.display else ""
+        if self._output.display:
+            self._output.border_title = (
+                " Output · Expanded " if self.cell.expanded else " Output "
+            )
+        else:
+            self._output.border_title = ""
+        self._output.update(self._render_output())
 
-    @staticmethod
-    def _render_output(output: str) -> Text | str:
-        content = output.rstrip()
+    def _render_output(self) -> Text | str:
+        content = self.cell.output.rstrip()
         if not content:
             return ""
-        return Text.from_ansi(content)
+        lines = content.splitlines()
+        truncated = not self.cell.expanded and len(lines) > self._output_max_lines
+        visible_text = (
+            "\n".join(lines[: self._output_max_lines]) if truncated else content
+        )
+        rendered = Text.from_ansi(visible_text)
+        if truncated:
+            rendered.append("\n\n")
+            rendered.append("... output truncated", style="bold #d68c4f")
+            rendered.append(" · press o to expand", style="#8a96a8")
+        elif self.cell.expanded and len(lines) > self._output_max_lines:
+            rendered.append("\n\n")
+            rendered.append("press o to collapse", style="#8a96a8")
+        return rendered
 
     def _mouse_targets_editor(self, widget) -> bool:
         current = widget

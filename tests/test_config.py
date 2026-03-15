@@ -49,6 +49,27 @@ markdown_center = true
             self.assertFalse(config.ui.show_footer)
             self.assertEqual(config.ui.status_verbosity, "full")
             self.assertTrue(config.ui.markdown_center)
+            self.assertEqual(config.ui.output_max_lines, 12)
+            self.assertEqual(config.ui.code_theme, "monokai")
+
+    def test_load_app_config_reads_output_and_theme_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_dir = Path(tmp_dir) / "popup-notebook"
+            config_dir.mkdir(parents=True)
+            (config_dir / "config.toml").write_text(
+                """
+[ui]
+output_max_lines = 20
+code_theme = "vscode_dark"
+""".strip(),
+                encoding="utf-8",
+            )
+
+            with patch.dict("os.environ", {"XDG_CONFIG_HOME": tmp_dir}):
+                config = load_app_config()
+
+            self.assertEqual(config.ui.output_max_lines, 20)
+            self.assertEqual(config.ui.code_theme, "vscode_dark")
 
     def test_open_uses_config_popup_geometry_when_flags_omitted(self) -> None:
         runner = CliRunner()

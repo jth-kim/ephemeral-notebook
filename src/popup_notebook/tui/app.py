@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 import os
 from pathlib import Path
+import shutil
+import subprocess
 import sys
 from typing import Iterable
 
@@ -165,6 +167,8 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
             Binding("b", "insert_below", "Insert Below"),
             Binding("m", "cell_markdown", "Markdown"),
             Binding("y", "cell_python", "Python"),
+            Binding("o", "toggle_output", show=False),
+            Binding("c", "copy_cell_source", show=False),
             Binding("z", "undo_delete", show=False),
             Binding("up", "select_up", show=False),
             Binding("down", "select_down", show=False),
@@ -201,6 +205,8 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
                 "insert_below",
                 "cell_markdown",
                 "cell_python",
+                "toggle_output",
+                "copy_cell_source",
                 "undo_delete",
                 "enter_edit",
                 "select_up",
@@ -285,6 +291,29 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
                 return
             if manager.set_cell_kind(context.project_root, self.model.current_cell_id, "python"):
                 await self._sync_widgets()
+
+        async def action_toggle_output(self) -> None:
+            if (
+                self.edit_mode
+                or self.model.current_cell_id is None
+                or self._pending_execution is not None
+            ):
+                return
+            if manager.toggle_cell_expanded(context.project_root, self.model.current_cell_id):
+                await self._sync_widgets(refocus=False)
+
+        def action_copy_cell_source(self) -> None:
+            if self.edit_mode or self.model.current_cell_id is None:
+                return
+            self.model.reload()
+            cell = next(
+                (cell for cell in self.model.session.cells if cell.id == self.model.current_cell_id),
+                None,
+            )
+            if cell is None:
+                return
+            self.copy_to_clipboard(cell.source)
+            self.notify("Copied current cell to clipboard.")
 
         async def action_run_and_stay(self) -> None:
             await self._execute_current_cell(move_to_next=False)
@@ -506,6 +535,8 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
                         current=(cell.id == self.model.current_cell_id),
                         edit_mode=(cell.id == self.model.current_cell_id and self.edit_mode),
                         markdown_center=config.ui.markdown_center,
+                        output_max_lines=config.ui.output_max_lines,
+                        code_theme=config.ui.code_theme,
                     )
                     for cell in self.model.session.cells
                 ]
@@ -697,6 +728,14 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
                     "dd deletes the current cell and z restores the most recently deleted cell in nav mode.",
                 ),
                 (
+                    "Shortcut: Copy current cell",
+                    "c copies the current cell source to the system clipboard in nav mode.",
+                ),
+                (
+                    "Shortcut: Toggle output",
+                    "o expands or collapses the current cell output in nav mode.",
+                ),
+                (
                     "Shortcut: Kernel control",
                     "ii interrupts the kernel and 00 restarts it in nav mode.",
                 ),
@@ -715,6 +754,17 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
             ]
             for title, help_text in commands:
                 yield SystemCommand(title, help_text, lambda message=help_text: self.notify(message))
+
+        def copy_to_clipboard(self, text: str) -> None:
+            super().copy_to_clipboard(text)
+            _copy_to_system_clipboard(text)
+
+        def load_system_clipboard(self) -> bool:
+            clipboard_text = _read_from_system_clipboard()
+            if clipboard_text is None:
+                return False
+            self.clipboard = clipboard_text
+            return True
 
     _configure_terminal_key_reporting()
     try:
@@ -739,3 +789,54 @@ def _write_terminal_control(sequence: str) -> None:
         os.write(sys.__stderr__.fileno(), sequence.encode("ascii"))
     except OSError:
         return
+
+
+def _copy_to_system_clipboard(text: str) -> None:
+    commands = []
+    if shutil.which("pbcopy"):
+        commands.append(["pbcopy"])
+    if shutil.which("wl-copy"):
+        commands.append(["wl-copy"])
+    if shutil.which("xclip"):
+        commands.append(["xclip", "-selection", "clipboard"])
+    if shutil.which("xsel"):
+        commands.append(["xsel", "--clipboard", "--input"])
+
+    for command in commands:
+        try:
+            subprocess.run(
+                command,
+                input=text,
+                text=True,
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return
+        except (OSError, subprocess.CalledProcessError):
+            continue
+
+
+def _read_from_system_clipboard() -> str | None:
+    commands = []
+    if shutil.which("pbpaste"):
+        commands.append(["pbpaste"])
+    if shutil.which("wl-paste"):
+        commands.append(["wl-paste", "--no-newline"])
+    if shutil.which("xclip"):
+        commands.append(["xclip", "-selection", "clipboard", "-o"])
+    if shutil.which("xsel"):
+        commands.append(["xsel", "--clipboard", "--output"])
+
+    for command in commands:
+        try:
+            completed = subprocess.run(
+                command,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except (OSError, subprocess.CalledProcessError):
+            continue
+        return completed.stdout
+    return None

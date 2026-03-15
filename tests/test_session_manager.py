@@ -267,6 +267,30 @@ class SessionManagerTests(unittest.TestCase):
                     manager.detach(project.resolve(), token)
                     manager.kill(project.resolve())
 
+    def test_toggle_cell_expanded_persists_output_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            project, _python = self._make_project(root)
+
+            with patch.dict("os.environ", {"XDG_STATE_HOME": str(root / "state")}):
+                with self._patched_context(project):
+                    manager = SessionManager()
+                    session = manager.get_or_create(project)
+                    cell_id = session.cells[0].id
+                    manager.update_cell_source(project.resolve(), cell_id, "print('hello')")
+                    saved = manager.get(project.resolve())
+                    assert saved is not None
+                    saved.cells[0].output = "line1\nline2\nline3"
+                    save_session_state(saved)
+
+                    toggled = manager.toggle_cell_expanded(project.resolve(), cell_id)
+                    updated = manager.get(project.resolve())
+
+                    self.assertTrue(toggled)
+                    self.assertIsNotNone(updated)
+                    assert updated is not None
+                    self.assertTrue(updated.cells[0].expanded)
+
     def test_execute_cell_recovers_missing_connection_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

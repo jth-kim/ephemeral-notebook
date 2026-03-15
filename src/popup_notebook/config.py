@@ -22,6 +22,8 @@ class UIConfig:
     show_footer: bool = True
     status_verbosity: str = "minimal"
     markdown_center: bool = False
+    output_max_lines: int = 12
+    code_theme: str = "monokai"
 
 
 @dataclass(frozen=True)
@@ -85,6 +87,12 @@ def load_app_config() -> AppConfig:
             ui.get("markdown_center"),
             DEFAULT_CONFIG.ui.markdown_center,
         ),
+        output_max_lines=_int_value(
+            ui.get("output_max_lines"),
+            DEFAULT_CONFIG.ui.output_max_lines,
+            minimum=3,
+        ),
+        code_theme=_string_value(ui.get("code_theme"), DEFAULT_CONFIG.ui.code_theme),
     )
 
     return AppConfig(popup=popup_config, ui=ui_config)
@@ -114,3 +122,9 @@ def _string_value(value: object, default: str) -> str:
 
 def _bool_value(value: object, default: bool) -> bool:
     return value if isinstance(value, bool) else default
+
+
+def _int_value(value: object, default: int, *, minimum: int) -> int:
+    if isinstance(value, int) and value >= minimum:
+        return value
+    return default

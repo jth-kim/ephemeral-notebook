@@ -50,4 +50,6 @@ y = "C"
 show_footer = true
 status_verbosity = "minimal"
 markdown_center = false
+output_max_lines = 12
+code_theme = "monokai"
 ```

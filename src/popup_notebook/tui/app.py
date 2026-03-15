@@ -25,6 +25,12 @@ class DeletedCellSnapshot:
     replace_placeholder: bool
 
 
+@dataclass(frozen=True)
+class PendingExecution:
+    cell_id: str
+    move_to_next: bool
+
+
 def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
     """Run the Textual app if available."""
     key_debug = key_debug or os.environ.get("POPUP_NOTEBOOK_KEY_DEBUG") == "1"
@@ -35,6 +41,7 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
         from textual.containers import VerticalScroll
         from textual.screen import Screen
         from textual.widgets import Footer
+        from textual.worker import Worker, WorkerState
     except ImportError as exc:
         raise RuntimeError(
             "Textual is not installed. Install project dependencies before running the UI."
@@ -105,6 +112,10 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
             background: rgb(49, 56, 66);
         }
 
+        .cell.running {
+            border: round rgb(216, 182, 91);
+        }
+
         .cell.markdown.current {
             background: rgb(43, 53, 56);
         }
@@ -163,6 +174,8 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
             self._pending_nav_sequence = ""
             self._pending_nav_timer = None
             self._deleted_cells: list[DeletedCellSnapshot] = []
+            self._pending_execution: PendingExecution | None = None
+            self._execution_worker = None
 
         def compose(self) -> ComposeResult:
             yield self._status
@@ -222,7 +235,7 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
             await self._enter_edit_mode()
 
         async def action_insert_above(self) -> None:
-            if self.edit_mode:
+            if self.edit_mode or self._pending_execution is not None:
                 return
             new_cell = manager.insert_cell_before(context.project_root, self.model.current_cell_id)
             if new_cell is None:
@@ -232,7 +245,7 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
             await self._rebuild_notebook()
 
         async def action_insert_below(self) -> None:
-            if self.edit_mode:
+            if self.edit_mode or self._pending_execution is not None:
                 return
             new_cell = manager.insert_cell_after(context.project_root, self.model.current_cell_id)
             if new_cell is None:
@@ -242,13 +255,21 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
             await self._rebuild_notebook()
 
         async def action_cell_markdown(self) -> None:
-            if self.edit_mode or self.model.current_cell_id is None:
+            if (
+                self.edit_mode
+                or self.model.current_cell_id is None
+                or self._pending_execution is not None
+            ):
                 return
             if manager.set_cell_kind(context.project_root, self.model.current_cell_id, "markdown"):
                 await self._sync_widgets()
 
         async def action_cell_python(self) -> None:
-            if self.edit_mode or self.model.current_cell_id is None:
+            if (
+                self.edit_mode
+                or self.model.current_cell_id is None
+                or self._pending_execution is not None
+            ):
                 return
             if manager.set_cell_kind(context.project_root, self.model.current_cell_id, "python"):
                 await self._sync_widgets()
@@ -278,6 +299,8 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
             self.query_one("#notebook", VerticalScroll).scroll_end(animate=False, immediate=True)
 
         async def action_delete_cell(self) -> None:
+            if self._pending_execution is not None:
+                return
             cell_id = self.model.current_cell_id
             if cell_id is None:
                 return
@@ -303,7 +326,7 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
             await self._rebuild_notebook()
 
         async def action_undo_delete(self) -> None:
-            if self.edit_mode or not self._deleted_cells:
+            if self.edit_mode or not self._deleted_cells or self._pending_execution is not None:
                 return
             snapshot = self._deleted_cells.pop()
             restored_cell_id = manager.restore_cell(
@@ -341,7 +364,7 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
             self.model.current_cell_id = message.cell_id
             self.edit_mode = message.edit_mode
             self._clear_nav_sequence()
-            await self._sync_widgets(refocus=False)
+            self._apply_widget_state(refocus=False)
 
         async def on_cell_widget_select_neighbor(
             self, message: CellWidget.SelectNeighbor
@@ -418,33 +441,21 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
             cell_id = self.model.current_cell_id
             if cell_id is None:
                 return
-
-            try:
-                result = manager.execute_cell(context.project_root, cell_id)
-            except Exception as exc:
-                self.notify(str(exc) or "Unable to execute current cell.", severity="error")
-                return
-            if result is None:
-                self.notify("Unable to execute current cell.", severity="error")
+            if self._pending_execution is not None:
+                self.notify("A cell is already running.", severity="warning")
                 return
 
-            await self._sync_widgets()
-
-            if not move_to_next:
-                return
-
-            next_id = self._next_cell_id(cell_id)
-            if next_id is None:
-                new_cell = manager.insert_cell_after(context.project_root, cell_id)
-                if new_cell is None:
-                    return
-                self.model.current_cell_id = new_cell.id
-                self.edit_mode = True
-                await self._rebuild_notebook()
-                return
-
-            self.model.current_cell_id = next_id
-            await self._enter_edit_mode()
+            self._pending_execution = PendingExecution(cell_id=cell_id, move_to_next=move_to_next)
+            self._execution_worker = self.run_worker(
+                lambda: manager.execute_cell(context.project_root, cell_id),
+                name="execute-cell",
+                group="execution",
+                description=f"Execute {cell_id}",
+                exit_on_error=False,
+                exclusive=True,
+                thread=True,
+            )
+            self._apply_widget_state(refocus=False)
 
         async def _move_selection(self, direction: str) -> None:
             if self.edit_mode or self.model.current_cell_id is None:
@@ -453,7 +464,7 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
             if neighbor is None:
                 return
             self.model.current_cell_id = neighbor
-            await self._sync_widgets()
+            self._apply_widget_state()
 
         def _next_cell_id(self, current_cell_id: str) -> str | None:
             for index, cell in enumerate(self.model.session.cells):
@@ -501,8 +512,23 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
                 widget = widgets[cell.id]
                 widget.set_current(cell.id == self.model.current_cell_id)
                 widget.set_edit_mode(cell.id == self.model.current_cell_id and self.edit_mode)
+                widget.set_running(
+                    self._pending_execution is not None and cell.id == self._pending_execution.cell_id
+                )
                 widget.sync_from_cell(cell)
 
+            self._update_status()
+            if refocus:
+                self.call_after_refresh(self._focus_current_cell)
+
+        def _apply_widget_state(self, *, refocus: bool = True) -> None:
+            for widget in self.query(CellWidget):
+                widget.set_current(widget.cell.id == self.model.current_cell_id)
+                widget.set_edit_mode(widget.cell.id == self.model.current_cell_id and self.edit_mode)
+                widget.set_running(
+                    self._pending_execution is not None
+                    and widget.cell.id == self._pending_execution.cell_id
+                )
             self._update_status()
             if refocus:
                 self.call_after_refresh(self._focus_current_cell)
@@ -525,12 +551,66 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
         async def _enter_edit_mode(self) -> None:
             self.edit_mode = True
             self._clear_nav_sequence()
-            await self._sync_widgets()
+            self._apply_widget_state()
 
         async def _exit_edit_mode(self) -> None:
             self.edit_mode = False
             self._clear_nav_sequence()
-            await self._sync_widgets()
+            self._apply_widget_state()
+
+        async def on_worker_state_changed(self, message: Worker.StateChanged) -> None:
+            if message.worker is not self._execution_worker:
+                return
+            if message.state not in {
+                WorkerState.SUCCESS,
+                WorkerState.ERROR,
+                WorkerState.CANCELLED,
+            }:
+                return
+
+            pending_execution = self._pending_execution
+            self._execution_worker = None
+            self._pending_execution = None
+
+            if message.state == WorkerState.ERROR:
+                self._apply_widget_state()
+                error = message.worker.error
+                self.notify(
+                    str(error) or "Unable to execute current cell.",
+                    severity="error",
+                )
+                return
+
+            if message.state == WorkerState.CANCELLED:
+                self._apply_widget_state()
+                self.notify("Execution cancelled.", severity="warning")
+                return
+
+            result = message.worker.result
+            if result is None or pending_execution is None:
+                self._apply_widget_state()
+                self.notify("Unable to execute current cell.", severity="error")
+                return
+
+            await self._sync_widgets(refocus=False)
+
+            if not pending_execution.move_to_next:
+                self._apply_widget_state()
+                return
+
+            next_id = self._next_cell_id(pending_execution.cell_id)
+            if next_id is None:
+                new_cell = manager.insert_cell_after(context.project_root, pending_execution.cell_id)
+                if new_cell is None:
+                    self._apply_widget_state()
+                    return
+                self.model.current_cell_id = new_cell.id
+                self.edit_mode = True
+                await self._rebuild_notebook()
+                return
+
+            self.model.current_cell_id = next_id
+            await self._enter_edit_mode()
 
         def _update_status(self) -> None:
             current_index = self.model.current_index()
@@ -540,6 +620,7 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
             pending = f"Pending: {self._pending_nav_sequence}" if self._pending_nav_sequence else None
             location = context.project_root.name or str(context.project_root)
             interpreter = context.interpreter.name
+            running = "RUN" if self._pending_execution is not None else None
             self._status.update(
                 "  ".join(
                     [
@@ -548,6 +629,7 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
                         f"{'EDIT' if self.edit_mode else 'NAV'}",
                         f"Cell {position}/{total if total else 0}",
                         f"K{generation}",
+                        *([running] if running else []),
                         *(["KeyDebug: keys.log"] if key_debug else []),
                     ]
                     + ([pending] if pending else [])

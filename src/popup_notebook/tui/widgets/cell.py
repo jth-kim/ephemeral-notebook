@@ -95,6 +95,7 @@ class CellWidget(VerticalGroup):
     cell_kind = reactive("python")
     is_current = reactive(False)
     in_edit_mode = reactive(False)
+    is_running = reactive(False)
 
     def __init__(self, cell: Cell, *, current: bool = False, edit_mode: bool = False) -> None:
         super().__init__(id=f"cell-{cell.id}", classes="cell")
@@ -152,6 +153,9 @@ class CellWidget(VerticalGroup):
     def watch_in_edit_mode(self) -> None:
         self._refresh()
 
+    def watch_is_running(self) -> None:
+        self._refresh()
+
     def on_text_area_changed(self, event: TextArea.Changed) -> None:
         if event.text_area is not self._editor:
             return
@@ -184,6 +188,9 @@ class CellWidget(VerticalGroup):
     def set_edit_mode(self, edit_mode: bool) -> None:
         self.in_edit_mode = edit_mode
 
+    def set_running(self, is_running: bool) -> None:
+        self.is_running = is_running
+
     def sync_from_cell(self, cell: Cell) -> None:
         self.cell = cell
         self.cell_kind = cell.kind
@@ -202,10 +209,11 @@ class CellWidget(VerticalGroup):
             execution = f" [{self.cell.execution_count}]"
         title_parts = [part for part in (marker, f"{kind_label}{execution}") if part]
         self.border_title = f" {' · '.join(title_parts)} "
-        self._editor.read_only = not self.in_edit_mode
+        self._editor.read_only = (not self.in_edit_mode) or self.is_running
         self._editor.show_cursor = self.in_edit_mode
         self.set_class(self.is_current, "current")
         self.set_class(self.in_edit_mode, "editing")
+        self.set_class(self.is_running, "running")
         self.set_class(self.cell_kind == "python", "python")
         self.set_class(self.cell_kind == "markdown", "markdown")
         self._output.display = bool(self.cell.output.strip())

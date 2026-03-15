@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import signal
 import subprocess
@@ -35,6 +36,7 @@ class KernelBootstrapError(RuntimeError):
 class KernelRuntime:
     pid: int
     connection_file: Path
+    connection_info: dict[str, object]
 
 
 @dataclass(frozen=True)
@@ -209,10 +211,28 @@ class KernelController:
         *,
         existing_pid: int | None,
         existing_connection_file: Path | None,
+        existing_connection_info: dict[str, object] | None = None,
     ) -> KernelRuntime:
         if existing_pid is not None and existing_connection_file is not None:
-            if self.is_alive(existing_pid) and existing_connection_file.exists():
-                return KernelRuntime(pid=existing_pid, connection_file=existing_connection_file)
+            if self.is_alive(existing_pid):
+                if existing_connection_file.exists():
+                    connection_info = (
+                        existing_connection_info
+                        if existing_connection_info is not None
+                        else self._load_connection_info(existing_connection_file)
+                    )
+                    return KernelRuntime(
+                        pid=existing_pid,
+                        connection_file=existing_connection_file,
+                        connection_info=connection_info,
+                    )
+                if existing_connection_info is not None:
+                    self._write_connection_info(existing_connection_file, existing_connection_info)
+                    return KernelRuntime(
+                        pid=existing_pid,
+                        connection_file=existing_connection_file,
+                        connection_info=existing_connection_info,
+                    )
         if existing_pid is not None or existing_connection_file is not None:
             self.shutdown(existing_pid, existing_connection_file)
         return self.start()
@@ -248,6 +268,8 @@ class KernelController:
             kernel_client.load_connection_file()
             kernel_client.start_channels()
             kernel_client.wait_for_ready(timeout=STARTUP_TIMEOUT)
+            connection_info = self._normalize_connection_info(kernel_client.get_connection_info())
+            self._write_connection_info(self.connection_file, connection_info)
             pid = kernel_manager.provisioner.pid
             assert pid is not None
         except Exception as exc:
@@ -262,13 +284,18 @@ class KernelController:
             if "kernel_client" in locals():
                 kernel_client.stop_channels()
 
-        return KernelRuntime(pid=pid, connection_file=self.connection_file)
+        return KernelRuntime(
+            pid=pid,
+            connection_file=self.connection_file,
+            connection_info=connection_info,
+        )
 
     def restart(
         self,
         *,
         existing_pid: int | None,
         existing_connection_file: Path | None,
+        existing_connection_info: dict[str, object] | None = None,
     ) -> KernelRuntime:
         self.shutdown(existing_pid, existing_connection_file)
         return self.start()
@@ -441,3 +468,22 @@ class KernelController:
         if "text/html" in data:
             return str(data["text/html"]).rstrip()
         return ""
+
+    @staticmethod
+    def _normalize_connection_info(connection_info: dict[str, object]) -> dict[str, object]:
+        normalized: dict[str, object] = {}
+        for key, value in connection_info.items():
+            if isinstance(value, bytes):
+                normalized[key] = value.decode("utf-8")
+            else:
+                normalized[key] = value
+        return normalized
+
+    @staticmethod
+    def _write_connection_info(connection_file: Path, connection_info: dict[str, object]) -> None:
+        connection_file.parent.mkdir(parents=True, exist_ok=True)
+        connection_file.write_text(json.dumps(connection_info, indent=2), encoding="utf-8")
+
+    @staticmethod
+    def _load_connection_info(connection_file: Path) -> dict[str, object]:
+        return json.loads(connection_file.read_text(encoding="utf-8"))

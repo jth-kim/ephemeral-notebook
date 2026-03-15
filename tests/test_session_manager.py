@@ -380,17 +380,28 @@ class SessionManagerTests(unittest.TestCase):
                 with self._patched_context(project):
                     manager = SessionManager()
                     session, token = manager.attach(project)
-                    cell_id = session.cells[0].id
+                    first_id = session.cells[0].id
+                    second = manager.insert_cell_after(project.resolve(), first_id)
+                    assert second is not None
+                    original_pid = session.kernel_pid
                     connection_file = session.connection_file
                     assert connection_file is not None
-                    connection_file.unlink()
+                    manager.update_cell_source(project.resolve(), first_id, "value = 40")
+                    first = manager.execute_cell(project.resolve(), first_id)
 
-                    manager.update_cell_source(project.resolve(), cell_id, "40 + 2")
-                    executed = manager.execute_cell(project.resolve(), cell_id)
+                    self.assertIsNotNone(first)
+                    assert first is not None
+                    connection_file.unlink()
+                    manager.update_cell_source(project.resolve(), second.id, "value + 2")
+                    executed = manager.execute_cell(project.resolve(), second.id)
+                    updated = manager.get(project.resolve())
 
                     self.assertIsNotNone(executed)
                     assert executed is not None
                     self.assertIn("42", executed.output)
+                    self.assertIsNotNone(updated)
+                    assert updated is not None
+                    self.assertEqual(updated.kernel_pid, original_pid)
 
                     manager.detach(project.resolve(), token)
                     manager.kill(project.resolve())

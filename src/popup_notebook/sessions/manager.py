@@ -104,11 +104,13 @@ class SessionManager:
             controller = self._controller(session)
             existing_pid = session.kernel_pid
             existing_connection_file = session.connection_file
+            existing_connection_info = session.connection_info
 
         try:
             runtime = controller.ensure_running(
                 existing_pid=existing_pid,
                 existing_connection_file=existing_connection_file,
+                existing_connection_info=existing_connection_info,
             )
         except Exception:
             with session_lock(context.project_root):
@@ -125,6 +127,7 @@ class SessionManager:
                 raise RuntimeError(f"Session for {context.project_root} disappeared during attach.")
             session.kernel_pid = runtime.pid
             session.connection_file = runtime.connection_file
+            session.connection_info = runtime.connection_info
             save_session_state(session)
             return session, token
 
@@ -268,6 +271,7 @@ class SessionManager:
             controller = self._controller(session)
             existing_pid = session.kernel_pid
             existing_connection_file = session.connection_file
+            existing_connection_info = session.connection_info
             startup_statements = load_project_notebook_settings(
                 session.project_root
             ).startup_statements
@@ -275,6 +279,7 @@ class SessionManager:
         runtime = controller.ensure_running(
             existing_pid=existing_pid,
             existing_connection_file=existing_connection_file,
+            existing_connection_info=existing_connection_info,
         )
 
         with session_lock(project_root):
@@ -283,6 +288,7 @@ class SessionManager:
                 return None
             session.kernel_pid = runtime.pid
             session.connection_file = runtime.connection_file
+            session.connection_info = runtime.connection_info
             should_bootstrap = (
                 session.bootstrapped_kernel_pid != runtime.pid
                 or session.bootstrap_version != BOOTSTRAP_VERSION
@@ -345,10 +351,12 @@ class SessionManager:
             controller = self._controller(session)
             existing_pid = session.kernel_pid
             existing_connection_file = session.connection_file
+            existing_connection_info = session.connection_info
 
         runtime = controller.restart(
             existing_pid=existing_pid,
             existing_connection_file=existing_connection_file,
+            existing_connection_info=existing_connection_info,
         )
 
         with session_lock(project_root):
@@ -358,6 +366,7 @@ class SessionManager:
             session.kernel_generation += 1
             session.kernel_pid = runtime.pid
             session.connection_file = runtime.connection_file
+            session.connection_info = runtime.connection_info
             session.bootstrapped_kernel_pid = None
             session.bootstrap_version = None
             save_session_state(session)
@@ -371,10 +380,12 @@ class SessionManager:
             controller = self._controller(session)
             existing_pid = session.kernel_pid
             existing_connection_file = session.connection_file
+            existing_connection_info = session.connection_info
 
         runtime = controller.restart(
             existing_pid=existing_pid,
             existing_connection_file=existing_connection_file,
+            existing_connection_info=existing_connection_info,
         )
 
         with session_lock(project_root):
@@ -384,6 +395,7 @@ class SessionManager:
             session.kernel_generation += 1
             session.kernel_pid = runtime.pid
             session.connection_file = runtime.connection_file
+            session.connection_info = runtime.connection_info
             session.bootstrapped_kernel_pid = None
             session.bootstrap_version = None
             session.cells = [self._blank_cell()]

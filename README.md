@@ -41,8 +41,8 @@ Example:
 
 ```toml
 [popup]
-width = "80%"
-height = "80%"
+width = "88%"
+height = "88%"
 x = "C"
 y = "C"
 

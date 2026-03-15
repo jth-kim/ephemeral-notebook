@@ -15,7 +15,7 @@ from popup_notebook.sessions.manager import BatchExecutionResult, SessionAttache
 from popup_notebook.sessions.models import Cell
 from popup_notebook.tui.notebook import NotebookViewModel
 from popup_notebook.tui.widgets.cell import (
-    RUN_STAY_KEYS,
+    RUN_CELL_KEYS,
     CellWidget,
     NotebookTextArea,
 )
@@ -181,7 +181,7 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
             Binding("end", "scroll_end", show=False),
             Binding("ctrl+u", "scroll_page_up", show=False),
             Binding("ctrl+d", "scroll_page_down", show=False),
-            *[Binding(key, "run_and_stay", show=False) for key in RUN_STAY_KEYS],
+            *[Binding(key, "run_and_move", show=False) for key in RUN_CELL_KEYS],
         ]
 
         def __init__(self) -> None:
@@ -877,12 +877,12 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
         def _shortcut_commands(self) -> Iterable[SystemCommand]:
             commands = [
                 (
-                    "Shortcut: Run current cell",
-                    "Ctrl+R in nav or edit mode. Executes the selected cell and keeps focus in place.",
+                    "Shortcut: Run and move",
+                    "Ctrl+R in nav or edit mode, or R in nav mode. Executes the selected cell and moves down, creating a new cell if needed.",
                 ),
                 (
-                    "Shortcut: Run and move",
-                    "R in nav mode. Executes the selected cell and moves to the next cell.",
+                    "Shortcut: Select all",
+                    "Cmd+A in edit mode selects the full current cell when your terminal forwards it.",
                 ),
                 (
                     "Shortcut: Enter edit mode",

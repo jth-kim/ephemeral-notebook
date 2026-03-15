@@ -3,7 +3,9 @@ from __future__ import annotations
 import textwrap
 
 from rich.text import Text
+from rich.style import Style
 from textual import events
+from textual._text_area_theme import TextAreaTheme
 from textual.containers import VerticalGroup
 from textual.message import Message
 from textual.reactive import reactive
@@ -11,7 +13,9 @@ from textual.widgets import Markdown, Static, TextArea
 
 from popup_notebook.sessions.models import Cell
 
-RUN_STAY_KEYS = ("ctrl+r",)
+RUN_CELL_KEYS = ("ctrl+r",)
+SELECTION_BG = "#4b6a8a"
+SELECTION_FG = "#f8f8f2"
 
 
 class NotebookTextArea(TextArea):
@@ -45,6 +49,12 @@ class NotebookTextArea(TextArea):
             self.post_message(self.ExitEdit(self.cell_id))
             return
 
+        if event.key == "super+a":
+            event.stop()
+            event.prevent_default()
+            self.action_select_all()
+            return
+
         if event.key in {"ctrl+v", "super+v"}:
             load_clipboard = getattr(self.app, "load_system_clipboard", None)
             if callable(load_clipboard) and load_clipboard():
@@ -53,10 +63,10 @@ class NotebookTextArea(TextArea):
                 self.action_paste()
                 return
 
-        if event.key in RUN_STAY_KEYS:
+        if event.key in RUN_CELL_KEYS:
             event.stop()
             event.prevent_default()
-            self.post_message(self.RunRequested(self.cell_id, move_to_next=False))
+            self.post_message(self.RunRequested(self.cell_id, move_to_next=True))
             return
 
         if event.key == "up":
@@ -131,7 +141,8 @@ class CellWidget(VerticalGroup):
         self._output = Static(classes="cell-output")
         self._markdown_center = markdown_center
         self._output_max_lines = output_max_lines
-        self._editor.theme = code_theme if code_theme in self._editor.available_themes else "css"
+        theme_name = self._register_editor_theme(code_theme)
+        self._editor.theme = theme_name
         self.cell_kind = cell.kind
         self.is_current = current
         self.in_edit_mode = edit_mode
@@ -301,3 +312,22 @@ class CellWidget(VerticalGroup):
                 )
                 height += len(wrapped) or 1
         self._editor.styles.height = height
+
+    def _register_editor_theme(self, code_theme: str) -> str:
+        base_name = code_theme if code_theme in self._editor.available_themes else "css"
+        base_theme = TextAreaTheme.get_builtin_theme(base_name)
+        if base_theme is None:
+            return base_name
+        derived_theme = TextAreaTheme(
+            name=f"{base_name}-popup-notebook",
+            base_style=base_theme.base_style,
+            gutter_style=base_theme.gutter_style,
+            cursor_style=base_theme.cursor_style,
+            cursor_line_style=base_theme.cursor_line_style,
+            cursor_line_gutter_style=base_theme.cursor_line_gutter_style,
+            bracket_matching_style=base_theme.bracket_matching_style,
+            selection_style=Style(color=SELECTION_FG, bgcolor=SELECTION_BG),
+            syntax_styles=dict(base_theme.syntax_styles),
+        )
+        self._editor.register_theme(derived_theme)
+        return derived_theme.name

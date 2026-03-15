@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import textwrap
 
+from rich.text import Text
 from textual import events
 from textual.containers import VerticalGroup
 from textual.message import Message
 from textual.reactive import reactive
-from textual.widgets import Static, TextArea
+from textual.widgets import Markdown, Static, TextArea
 
 from popup_notebook.sessions.models import Cell
 
@@ -97,7 +98,14 @@ class CellWidget(VerticalGroup):
     in_edit_mode = reactive(False)
     is_running = reactive(False)
 
-    def __init__(self, cell: Cell, *, current: bool = False, edit_mode: bool = False) -> None:
+    def __init__(
+        self,
+        cell: Cell,
+        *,
+        current: bool = False,
+        edit_mode: bool = False,
+        markdown_center: bool = False,
+    ) -> None:
         super().__init__(id=f"cell-{cell.id}", classes="cell")
         self.cell = cell
         self._editor = NotebookTextArea(
@@ -109,13 +117,16 @@ class CellWidget(VerticalGroup):
             id=f"editor-{cell.id}",
             tab_behavior="indent",
         )
+        self._markdown = Markdown(cell.source, classes="cell-markdown-render")
         self._output = Static(self._render_output(cell.output), classes="cell-output")
+        self._markdown_center = markdown_center
         self.cell_kind = cell.kind
         self.is_current = current
         self.in_edit_mode = edit_mode
 
     def compose(self):
         yield self._editor
+        yield self._markdown
         yield self._output
 
     def on_mount(self) -> None:
@@ -197,6 +208,7 @@ class CellWidget(VerticalGroup):
         if self._editor.text != cell.source:
             self._editor.load_text(cell.source)
         self._editor.language = cell.kind if cell.kind in {"python", "markdown"} else None
+        self._markdown.update(cell.source)
         self._output.update(self._render_output(cell.output))
         self.call_after_refresh(self._update_editor_height)
         self._refresh()
@@ -209,6 +221,9 @@ class CellWidget(VerticalGroup):
             execution = f" [{self.cell.execution_count}]"
         title_parts = [part for part in (marker, f"{kind_label}{execution}") if part]
         self.border_title = f" {' · '.join(title_parts)} "
+        show_markdown = self.cell_kind == "markdown" and not self.in_edit_mode
+        self._editor.display = not show_markdown
+        self._markdown.display = show_markdown
         self._editor.read_only = (not self.in_edit_mode) or self.is_running
         self._editor.show_cursor = self.in_edit_mode
         self.set_class(self.is_current, "current")
@@ -216,11 +231,16 @@ class CellWidget(VerticalGroup):
         self.set_class(self.is_running, "running")
         self.set_class(self.cell_kind == "python", "python")
         self.set_class(self.cell_kind == "markdown", "markdown")
+        self._markdown.set_class(self._markdown_center, "centered")
         self._output.display = bool(self.cell.output.strip())
+        self._output.border_title = " Output " if self._output.display else ""
 
     @staticmethod
-    def _render_output(output: str) -> str:
-        return output.rstrip() if output.strip() else ""
+    def _render_output(output: str) -> Text | str:
+        content = output.rstrip()
+        if not content:
+            return ""
+        return Text.from_ansi(content)
 
     def _mouse_targets_editor(self, widget) -> bool:
         current = widget

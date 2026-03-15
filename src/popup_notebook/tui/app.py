@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 from typing import Iterable
 
+from popup_notebook.config import load_app_config
 from popup_notebook.project import build_project_context
 from popup_notebook.sessions.manager import SessionAttachedError, SessionManager
 from popup_notebook.sessions.models import Cell
@@ -48,6 +49,7 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
         ) from exc
 
     context = build_project_context(cwd)
+    config = load_app_config()
     manager = SessionManager()
     try:
         session, attachment_token = manager.attach(cwd)
@@ -65,8 +67,8 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
             margin: 0 1 1 1;
             padding: 0 1;
             border: round $primary;
-            background: $panel;
-            color: $text;
+            background: rgb(24, 27, 31);
+            color: rgb(221, 225, 229);
         }
 
         #notebook {
@@ -127,9 +129,18 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
         .cell-output {
             margin-top: 1;
             padding: 0 1;
-            border: round $secondary;
-            background: $surface-darken-1;
+            border: round rgb(95, 109, 124);
+            background: rgb(24, 27, 32);
             color: rgb(225, 225, 219);
+        }
+
+        .cell-markdown-render {
+            padding: 0 1;
+            color: rgb(223, 228, 225);
+        }
+
+        .cell-markdown-render.centered {
+            text-align: center;
         }
 
         TextArea {
@@ -181,7 +192,8 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
             yield self._status
             with VerticalScroll(id="notebook"):
                 pass
-            yield Footer()
+            if config.ui.show_footer:
+                yield Footer(compact=True)
 
         def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
             if action in {
@@ -493,6 +505,7 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
                         cell,
                         current=(cell.id == self.model.current_cell_id),
                         edit_mode=(cell.id == self.model.current_cell_id and self.edit_mode),
+                        markdown_center=config.ui.markdown_center,
                     )
                     for cell in self.model.session.cells
                 ]
@@ -621,14 +634,27 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
             location = context.project_root.name or str(context.project_root)
             interpreter = context.interpreter.name
             running = "RUN" if self._pending_execution is not None else None
+            if config.ui.status_verbosity == "full":
+                status_parts = [
+                    f"Project {context.project_root}",
+                    f"Python {context.interpreter}",
+                    f"Source {context.interpreter_source}",
+                    f"Mode {'EDIT' if self.edit_mode else 'NAV'}",
+                    f"Cell {position}/{total if total else 0}",
+                    f"Kernel {generation}",
+                ]
+            else:
+                status_parts = [
+                    location,
+                    interpreter,
+                    f"{'EDIT' if self.edit_mode else 'NAV'}",
+                    f"Cell {position}/{total if total else 0}",
+                    f"K{generation}",
+                ]
             self._status.update(
                 "  ".join(
-                    [
-                        location,
-                        interpreter,
-                        f"{'EDIT' if self.edit_mode else 'NAV'}",
-                        f"Cell {position}/{total if total else 0}",
-                        f"K{generation}",
+                    status_parts
+                    + [
                         *([running] if running else []),
                         *(["KeyDebug: keys.log"] if key_debug else []),
                     ]
@@ -681,6 +707,10 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
                 (
                     "Shortcut: Hide popup",
                     "Ctrl+Q detaches the popup and keeps the background session alive.",
+                ),
+                (
+                    "Config: Global config file",
+                    "Global settings live in ~/.config/popup-notebook/config.toml or XDG_CONFIG_HOME.",
                 ),
             ]
             for title, help_text in commands:

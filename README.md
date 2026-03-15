@@ -32,3 +32,22 @@ This repository currently contains:
 ## Development
 
 This scaffold is intentionally light. The first implemented behavior is project root and Python interpreter resolution.
+
+## Global Config
+
+Optional global settings live at `~/.config/popup-notebook/config.toml` or under `XDG_CONFIG_HOME`.
+
+Example:
+
+```toml
+[popup]
+width = "80%"
+height = "80%"
+x = "C"
+y = "C"
+
+[ui]
+show_footer = true
+status_verbosity = "minimal"
+markdown_center = false
+```

@@ -7,6 +7,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from popup_notebook.config import load_app_config
 from popup_notebook.launcher import PopupGeometry, in_tmux, launch_tmux_popup
 from popup_notebook.project import build_project_context
 from popup_notebook.sessions.manager import SessionManager
@@ -44,16 +45,22 @@ def status(cwd: Path = typer.Option(Path.cwd(), "--cwd", help="Working directory
 @app.command()
 def open(
     cwd: Path = typer.Option(Path.cwd(), "--cwd", help="Working directory to open from."),
-    width: str = typer.Option("80%", "--width", help="Popup width."),
-    height: str = typer.Option("80%", "--height", help="Popup height."),
-    x: str = typer.Option("C", "--x", help="Popup x position."),
-    y: str = typer.Option("C", "--y", help="Popup y position."),
+    width: str | None = typer.Option(None, "--width", help="Popup width."),
+    height: str | None = typer.Option(None, "--height", help="Popup height."),
+    x: str | None = typer.Option(None, "--x", help="Popup x position."),
+    y: str | None = typer.Option(None, "--y", help="Popup y position."),
     key_debug: bool = typer.Option(False, "--key-debug", help="Write raw key input to keys.log."),
 ) -> None:
     """Open the scratchpad UI, using a tmux popup when possible."""
     if key_debug:
         _prepare_key_debug(cwd.resolve())
-    geometry = PopupGeometry(width=width, height=height, x=x, y=y)
+    config = load_app_config()
+    geometry = PopupGeometry(
+        width=width or config.popup.width,
+        height=height or config.popup.height,
+        x=x or config.popup.x,
+        y=y or config.popup.y,
+    )
     if in_tmux():
         launch_tmux_popup(cwd.resolve(), geometry, key_debug=key_debug)
         return

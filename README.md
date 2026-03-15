@@ -66,8 +66,7 @@ startup = ["from math import sqrt"]
 
 `startup_imports` expands to normal Python `import ...` statements. `startup` accepts arbitrary Python lines.
 
-## Built-in Helpers
+## Built-in Formatting
 
-The kernel bootstrap installs one helper:
-
-- `table(value)` for terminal-friendly tables from lists, dicts, pandas Series, and DataFrames
+When `pandas` is available in the resolved interpreter, popup-notebook installs text/plain
+formatters so `DataFrame` and `Series` outputs render as terminal-friendly tables by default.

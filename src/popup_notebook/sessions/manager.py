@@ -6,7 +6,7 @@ from uuid import uuid4
 
 from popup_notebook.project import build_project_context, load_project_notebook_settings
 from popup_notebook.sessions.bootstrap import BOOTSTRAP_VERSION
-from popup_notebook.sessions.kernel import KernelController
+from popup_notebook.sessions.kernel import KernelController, KernelRuntime
 from popup_notebook.sessions.models import Cell, CellKind, SessionState
 from popup_notebook.sessions.store import (
     delete_session_state,
@@ -24,6 +24,13 @@ class SessionAttachedError(RuntimeError):
 class BatchExecutionResult:
     executed_cell_ids: tuple[str, ...]
     failed_cell_id: str | None = None
+
+
+@dataclass(frozen=True)
+class PreparedKernelSession:
+    runtime: KernelRuntime
+    startup_statements: tuple[str, ...]
+    should_bootstrap: bool
 
 
 class SessionManager:
@@ -201,54 +208,23 @@ class SessionManager:
             return cell
 
     def execute_cells(self, project_root: Path, cell_ids: list[str]) -> BatchExecutionResult:
-        with session_lock(project_root):
-            session = load_session_state(project_root)
-            if session is None:
-                return BatchExecutionResult(executed_cell_ids=())
-            cells = {
-                cell.id: cell
-                for cell in session.cells
-                if cell.id in cell_ids
-            }
-            execution_plan = [cells[cell_id] for cell_id in cell_ids if cell_id in cells]
-            if not execution_plan:
-                return BatchExecutionResult(executed_cell_ids=())
-            controller = self._controller(session)
-            existing_pid = session.kernel_pid
-            existing_connection_file = session.connection_file
-            startup_statements = load_project_notebook_settings(
-                session.project_root
-            ).startup_statements
+        execution_plan = self.load_cells(project_root, cell_ids)
+        if not execution_plan:
+            return BatchExecutionResult(executed_cell_ids=())
 
         runtime = None
+        controller = None
         if any(cell.kind == "python" for cell in execution_plan):
-            runtime = controller.ensure_running(
-                existing_pid=existing_pid,
-                existing_connection_file=existing_connection_file,
-            )
-            with session_lock(project_root):
-                session = load_session_state(project_root)
-                if session is None:
-                    return BatchExecutionResult(executed_cell_ids=())
-                session.kernel_pid = runtime.pid
-                session.connection_file = runtime.connection_file
-                should_bootstrap = (
-                    session.bootstrapped_kernel_pid != runtime.pid
-                    or session.bootstrap_version != BOOTSTRAP_VERSION
-                )
-                if should_bootstrap:
-                    session.bootstrapped_kernel_pid = None
-                    session.bootstrap_version = None
-                save_session_state(session)
-            if should_bootstrap:
-                controller.bootstrap(runtime.connection_file, startup_statements)
-                with session_lock(project_root):
-                    session = load_session_state(project_root)
-                    if session is None:
-                        return BatchExecutionResult(executed_cell_ids=())
-                    session.bootstrapped_kernel_pid = runtime.pid
-                    session.bootstrap_version = BOOTSTRAP_VERSION
-                    save_session_state(session)
+            prepared = self.prepare_kernel_session(project_root)
+            if prepared is None:
+                return BatchExecutionResult(executed_cell_ids=())
+            runtime = prepared.runtime
+            controller = self._controller_for_project(project_root)
+            if controller is None:
+                return BatchExecutionResult(executed_cell_ids=())
+            if prepared.should_bootstrap:
+                controller.bootstrap(runtime.connection_file, prepared.startup_statements)
+                self.mark_kernel_bootstrapped(project_root, runtime.pid)
 
         executed_cell_ids: list[str] = []
         failed_cell_id = None
@@ -260,22 +236,19 @@ class SessionManager:
                 success = True
             else:
                 assert runtime is not None
+                assert controller is not None
                 execution = controller.execute(runtime.connection_file, plan_cell.source)
                 output = execution.output
                 execution_count = execution.execution_count
                 success = execution.success
 
-            with session_lock(project_root):
-                session = load_session_state(project_root)
-                if session is None:
-                    break
-                current_cell = self._find_cell(session, plan_cell.id)
-                if current_cell is None:
-                    break
-                current_cell.output = output
-                current_cell.execution_count = execution_count
-                current_cell.expanded = False
-                save_session_state(session)
+            if not self.persist_execution_result(
+                project_root,
+                plan_cell.id,
+                output=output,
+                execution_count=execution_count,
+            ):
+                break
 
             executed_cell_ids.append(plan_cell.id)
             if not success:
@@ -286,6 +259,83 @@ class SessionManager:
             executed_cell_ids=tuple(executed_cell_ids),
             failed_cell_id=failed_cell_id,
         )
+
+    def prepare_kernel_session(self, project_root: Path) -> PreparedKernelSession | None:
+        with session_lock(project_root):
+            session = load_session_state(project_root)
+            if session is None:
+                return None
+            controller = self._controller(session)
+            existing_pid = session.kernel_pid
+            existing_connection_file = session.connection_file
+            startup_statements = load_project_notebook_settings(
+                session.project_root
+            ).startup_statements
+
+        runtime = controller.ensure_running(
+            existing_pid=existing_pid,
+            existing_connection_file=existing_connection_file,
+        )
+
+        with session_lock(project_root):
+            session = load_session_state(project_root)
+            if session is None:
+                return None
+            session.kernel_pid = runtime.pid
+            session.connection_file = runtime.connection_file
+            should_bootstrap = (
+                session.bootstrapped_kernel_pid != runtime.pid
+                or session.bootstrap_version != BOOTSTRAP_VERSION
+            )
+            if should_bootstrap:
+                session.bootstrapped_kernel_pid = None
+                session.bootstrap_version = None
+            save_session_state(session)
+
+        return PreparedKernelSession(
+            runtime=runtime,
+            startup_statements=startup_statements,
+            should_bootstrap=should_bootstrap,
+        )
+
+    def mark_kernel_bootstrapped(self, project_root: Path, kernel_pid: int) -> bool:
+        with session_lock(project_root):
+            session = load_session_state(project_root)
+            if session is None or session.kernel_pid != kernel_pid:
+                return False
+            session.bootstrapped_kernel_pid = kernel_pid
+            session.bootstrap_version = BOOTSTRAP_VERSION
+            save_session_state(session)
+            return True
+
+    def load_cells(self, project_root: Path, cell_ids: list[str] | tuple[str, ...]) -> list[Cell]:
+        with session_lock(project_root):
+            session = load_session_state(project_root)
+            if session is None:
+                return []
+            cells = {cell.id: cell for cell in session.cells if cell.id in cell_ids}
+            return [Cell.from_dict(cells[cell_id].to_dict()) for cell_id in cell_ids if cell_id in cells]
+
+    def persist_execution_result(
+        self,
+        project_root: Path,
+        cell_id: str,
+        *,
+        output: str,
+        execution_count: int | None,
+    ) -> bool:
+        with session_lock(project_root):
+            session = load_session_state(project_root)
+            if session is None:
+                return False
+            current_cell = self._find_cell(session, cell_id)
+            if current_cell is None:
+                return False
+            current_cell.output = output
+            current_cell.execution_count = execution_count
+            current_cell.expanded = False
+            save_session_state(session)
+            return True
 
     def reset(self, project_root: Path) -> bool:
         with session_lock(project_root):
@@ -437,6 +487,13 @@ class SessionManager:
     @staticmethod
     def _controller(session: SessionState) -> KernelController:
         return KernelController(session.project_root, session.interpreter)
+
+    def _controller_for_project(self, project_root: Path) -> KernelController | None:
+        with session_lock(project_root):
+            session = load_session_state(project_root)
+            if session is None:
+                return None
+            return self._controller(session)
 
     @staticmethod
     def _find_cell(session: SessionState, cell_id: str) -> Cell | None:

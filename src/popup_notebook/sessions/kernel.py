@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import signal
 import subprocess
@@ -41,6 +42,156 @@ class ExecutionResult:
     output: str
     execution_count: int | None
     success: bool
+
+
+class LiveKernelClient:
+    """Keep one async client connected for the lifetime of a popup session."""
+
+    def __init__(self) -> None:
+        self._client = None
+        self._kernel_pid: int | None = None
+        self._connection_file: Path | None = None
+        self._lock = asyncio.Lock()
+
+    async def ensure_connected(self, *, kernel_pid: int, connection_file: Path) -> None:
+        async with self._lock:
+            if (
+                self._client is not None
+                and self._kernel_pid == kernel_pid
+                and self._connection_file == connection_file
+            ):
+                return
+
+            self.close()
+
+            from jupyter_client.asynchronous import AsyncKernelClient
+
+            client = AsyncKernelClient(connection_file=str(connection_file))
+            client.load_connection_file()
+            client.start_channels()
+            try:
+                await client.wait_for_ready(timeout=STARTUP_TIMEOUT)
+            except Exception:
+                client.stop_channels()
+                raise
+
+            self._client = client
+            self._kernel_pid = kernel_pid
+            self._connection_file = connection_file
+
+    def close(self) -> None:
+        if self._client is not None:
+            self._client.stop_channels()
+        self._client = None
+        self._kernel_pid = None
+        self._connection_file = None
+
+    async def execute(self, code: str) -> ExecutionResult:
+        async with self._lock:
+            try:
+                return await self._execute_request(
+                    code,
+                    store_history=True,
+                    silent=False,
+                )
+            except Exception:
+                self.close()
+                raise
+
+    async def bootstrap(self, startup_statements: tuple[str, ...]) -> None:
+        async with self._lock:
+            try:
+                result = await self._execute_request(
+                    build_bootstrap_code(startup_statements),
+                    store_history=False,
+                    silent=True,
+                )
+            except Exception:
+                self.close()
+                raise
+        if result.success:
+            return
+        message = result.output or "Failed to initialize popup-notebook kernel helpers."
+        raise KernelBootstrapError(message)
+
+    async def _execute_request(
+        self,
+        code: str,
+        *,
+        store_history: bool,
+        silent: bool,
+    ) -> ExecutionResult:
+        client = self._client
+        if client is None:
+            raise RuntimeError("Kernel client is not connected.")
+
+        message_id = client.execute(
+            code,
+            store_history=store_history,
+            silent=silent,
+            stop_on_error=True,
+        )
+        outputs: list[str] = []
+        success = True
+
+        while True:
+            try:
+                message = await client.get_iopub_msg(timeout=EXECUTION_TIMEOUT)
+            except Empty as exc:
+                raise ExecutionTimeoutError(
+                    "Execution timed out after 60s. The kernel may still be running; "
+                    "wait, reopen the popup, or interrupt with ii."
+                ) from exc
+            if message.get("parent_header", {}).get("msg_id") != message_id:
+                continue
+
+            msg_type = message["msg_type"]
+            content = message["content"]
+
+            if msg_type == "stream":
+                text = str(content.get("text", "")).rstrip()
+                if text:
+                    outputs.append(text)
+            elif msg_type in {"execute_result", "display_data"}:
+                rendered = KernelController._render_output_data(content.get("data", {}))
+                if rendered:
+                    outputs.append(rendered)
+            elif msg_type == "error":
+                success = False
+                traceback = content.get("traceback", [])
+                if traceback:
+                    outputs.append("\n".join(str(line) for line in traceback))
+                else:
+                    outputs.append(
+                        f"{content.get('ename', 'Error')}: {content.get('evalue', '')}".rstrip()
+                    )
+            elif msg_type == "status" and content.get("execution_state") == "idle":
+                break
+
+        try:
+            reply = await client.get_shell_msg(timeout=EXECUTION_TIMEOUT)
+        except Empty:
+            reply = None
+
+        execution_count = None
+        if reply is not None:
+            content = reply.get("content", {})
+            execution_count_value = content.get("execution_count")
+            if execution_count_value is not None:
+                execution_count = int(execution_count_value)
+            if content.get("status") == "error" and not outputs:
+                success = False
+                outputs.append(
+                    f"{content.get('ename', 'Error')}: {content.get('evalue', '')}".rstrip()
+                )
+            elif content.get("status") == "error":
+                success = False
+
+        return ExecutionResult(
+            output="\n\n".join(part for part in outputs if part).strip(),
+            execution_count=execution_count,
+            success=success,
+        )
 
 
 class KernelController:

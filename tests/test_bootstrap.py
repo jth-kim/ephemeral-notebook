@@ -13,6 +13,7 @@ class BootstrapTests(unittest.TestCase):
         self.assertIn(str(BOOTSTRAP_VERSION), code)
         self.assertIn("import numpy as np", code)
         self.assertIn("VALUE = 'ok'", code)
+        self.assertNotIn("def table(", code)
         compile(code, "<bootstrap>", "exec")
 
 

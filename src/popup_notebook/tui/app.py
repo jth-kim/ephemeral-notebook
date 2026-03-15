@@ -10,6 +10,7 @@ from typing import Iterable
 
 from popup_notebook.config import load_app_config
 from popup_notebook.project import build_project_context
+from popup_notebook.sessions.kernel import LiveKernelClient
 from popup_notebook.sessions.manager import BatchExecutionResult, SessionAttachedError, SessionManager
 from popup_notebook.sessions.models import Cell
 from popup_notebook.tui.notebook import NotebookViewModel
@@ -187,6 +188,7 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
             super().__init__()
             self.model = NotebookViewModel(manager, context.project_root, session)
             self._status = StatusBarWidget(id="status")
+            self._live_kernel = LiveKernelClient()
             self.edit_mode = True
             self._pending_nav_sequence = ""
             self._pending_nav_timer = None
@@ -220,6 +222,12 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
 
         async def on_mount(self) -> None:
             await self._rebuild_notebook()
+            self.run_worker(
+                self._warm_kernel_client(),
+                name="warm-kernel",
+                group="kernel",
+                exit_on_error=False,
+            )
 
         async def on_key(self, event) -> None:
             if self.edit_mode:
@@ -430,8 +438,18 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
                 self.notify("Unable to interrupt kernel.", severity="warning")
 
         async def action_restart_kernel(self) -> None:
+            if self._pending_execution is not None:
+                self.notify("A cell is already running.", severity="warning")
+                return
             if manager.reset(context.project_root):
+                self._live_kernel.close()
                 await self._sync_widgets()
+                self.run_worker(
+                    self._warm_kernel_client(),
+                    name="warm-kernel",
+                    group="kernel",
+                    exit_on_error=False,
+                )
                 self.notify("Kernel restarted.")
             else:
                 self.notify("Unable to restart kernel.", severity="warning")
@@ -561,13 +579,12 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
                 move_to_next=move_to_next,
             )
             self._execution_worker = self.run_worker(
-                lambda: manager.execute_cells(context.project_root, list(cell_ids)),
+                self._run_execution_batch(cell_ids),
                 name="execute-cell",
                 group="execution",
                 description=f"{label} {len(cell_ids)} cell(s)",
                 exit_on_error=False,
                 exclusive=True,
-                thread=True,
             )
             self._apply_widget_state(refocus=False)
 
@@ -674,6 +691,67 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
             self.edit_mode = False
             self._clear_nav_sequence()
             self._apply_widget_state()
+
+        async def _warm_kernel_client(self) -> None:
+            try:
+                await self._prepare_live_kernel()
+            except Exception:
+                return
+
+        async def _prepare_live_kernel(self) -> bool:
+            prepared = manager.prepare_kernel_session(context.project_root)
+            if prepared is None:
+                return False
+            await self._live_kernel.ensure_connected(
+                kernel_pid=prepared.runtime.pid,
+                connection_file=prepared.runtime.connection_file,
+            )
+            if prepared.should_bootstrap:
+                await self._live_kernel.bootstrap(prepared.startup_statements)
+                manager.mark_kernel_bootstrapped(context.project_root, prepared.runtime.pid)
+            return True
+
+        async def _run_execution_batch(self, cell_ids: tuple[str, ...]) -> BatchExecutionResult:
+            execution_plan = manager.load_cells(context.project_root, cell_ids)
+            if not execution_plan:
+                return BatchExecutionResult(executed_cell_ids=())
+
+            if any(cell.kind == "python" for cell in execution_plan):
+                prepared = await self._prepare_live_kernel()
+                if not prepared:
+                    return BatchExecutionResult(executed_cell_ids=())
+
+            executed_cell_ids: list[str] = []
+            failed_cell_id = None
+
+            for plan_cell in execution_plan:
+                if plan_cell.kind == "markdown":
+                    output = ""
+                    execution_count = None
+                    success = True
+                else:
+                    execution = await self._live_kernel.execute(plan_cell.source)
+                    output = execution.output
+                    execution_count = execution.execution_count
+                    success = execution.success
+
+                if not manager.persist_execution_result(
+                    context.project_root,
+                    plan_cell.id,
+                    output=output,
+                    execution_count=execution_count,
+                ):
+                    break
+
+                executed_cell_ids.append(plan_cell.id)
+                if not success:
+                    failed_cell_id = plan_cell.id
+                    break
+
+            return BatchExecutionResult(
+                executed_cell_ids=tuple(executed_cell_ids),
+                failed_cell_id=failed_cell_id,
+            )
 
         async def on_worker_state_changed(self, message: Worker.StateChanged) -> None:
             if message.worker is not self._execution_worker:
@@ -843,10 +921,6 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
                     "xx clears the current cell output in nav mode.",
                 ),
                 (
-                    "Helper: table(value)",
-                    "Render lists, dicts, pandas Series, or DataFrames as terminal-friendly tables.",
-                ),
-                (
                     "Shortcut: Kernel control",
                     "ii interrupts the kernel and 00 restarts it in nav mode.",
                 ),
@@ -886,9 +960,11 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
             return True
 
     _configure_terminal_key_reporting()
+    app = PopupNotebookApp()
     try:
-        PopupNotebookApp().run()
+        app.run()
     finally:
+        app._live_kernel.close()
         _restore_terminal_key_reporting()
         manager.detach(context.project_root, attachment_token)
 

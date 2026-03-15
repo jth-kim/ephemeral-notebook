@@ -5,18 +5,7 @@ import json
 import textwrap
 
 
-BOOTSTRAP_VERSION = 2
-
-
-class _PNRenderable:
-    def __init__(self, text):
-        self.text = text
-
-    def __repr__(self):
-        return self.text
-
-    def __str__(self):
-        return self.text
+BOOTSTRAP_VERSION = 3
 
 
 def _pn_is_number(value):
@@ -117,96 +106,6 @@ def _pn_format_series(series, max_rows=20, max_width=24):
     )
 
 
-def _pn_format_generic_table(value, max_rows=20, max_cols=8, max_width=24):
-    if isinstance(value, dict):
-        headers = ["key", "value"]
-        rows = [[key, item] for key, item in list(value.items())[:max_rows]]
-        if len(value) > max_rows:
-            rows.append(["…", "…"])
-        aligns = [False, all(_pn_is_number(row[1]) for row in rows if row[1] != "…")]
-        return _pn_box_table(headers, rows, aligns, max_width=max_width)
-
-    if isinstance(value, (list, tuple)):
-        items = list(value)
-        if not items:
-            return "(empty)"
-
-        sample = items[0]
-        if isinstance(sample, dict):
-            headers = list(sample.keys())[:max_cols]
-            rows = [
-                [item.get(header, "") for header in headers]
-                for item in items[:max_rows]
-            ]
-            if len(items) > max_rows:
-                rows.append(["…"] * len(headers))
-            aligns = []
-            for column_index in range(len(headers)):
-                column_values = [row[column_index] for row in rows if row[column_index] != "…"]
-                aligns.append(
-                    bool(column_values) and all(_pn_is_number(column) for column in column_values)
-                )
-            return _pn_box_table(headers, rows, aligns, max_width=max_width)
-
-        if isinstance(sample, (list, tuple)):
-            width = min(max_cols, max(len(row) for row in items[:max_rows]))
-            headers = [f"c{index + 1}" for index in range(width)]
-            rows = [list(row)[:width] for row in items[:max_rows]]
-            if len(items) > max_rows:
-                rows.append(["…"] * len(headers))
-            aligns = []
-            for column_index in range(len(headers)):
-                column_values = [row[column_index] for row in rows if row[column_index] != "…"]
-                aligns.append(
-                    bool(column_values) and all(_pn_is_number(column) for column in column_values)
-                )
-            return _pn_box_table(headers, rows, aligns, max_width=max_width)
-
-        headers = ["#", "value"]
-        rows = [[index, item] for index, item in enumerate(items[:max_rows])]
-        if len(items) > max_rows:
-            rows.append(["…", "…"])
-        aligns = [True, all(_pn_is_number(row[1]) for row in rows if row[1] != "…")]
-        return _pn_box_table(headers, rows, aligns, max_width=max_width)
-
-    return _pn_clip(value, max_width=max_width)
-
-
-def table(value, max_rows=20, max_cols=8, max_width=24):
-    try:
-        import pandas as _pn_pd
-    except Exception:
-        _pn_pd = None
-
-    if _pn_pd is not None:
-        if isinstance(value, _pn_pd.DataFrame):
-            return _PNRenderable(
-                _pn_format_dataframe(
-                    value,
-                    max_rows=max_rows,
-                    max_cols=max_cols,
-                    max_width=max_width,
-                )
-            )
-        if isinstance(value, _pn_pd.Series):
-            return _PNRenderable(
-                _pn_format_series(
-                    value,
-                    max_rows=max_rows,
-                    max_width=max_width,
-                )
-            )
-
-    return _PNRenderable(
-        _pn_format_generic_table(
-            value,
-            max_rows=max_rows,
-            max_cols=max_cols,
-            max_width=max_width,
-        )
-    )
-
-
 def _pn_install_display_formatters(ipython_shell):
     try:
         import pandas as _pn_pd
@@ -228,15 +127,12 @@ def _pn_install_display_formatters(ipython_shell):
 def build_bootstrap_code(startup_statements: tuple[str, ...]) -> str:
     """Build idempotent kernel bootstrap code for helpers and startup statements."""
     components = [
-        _PNRenderable,
         _pn_is_number,
         _pn_clip,
         _pn_align,
         _pn_box_table,
         _pn_format_dataframe,
         _pn_format_series,
-        _pn_format_generic_table,
-        table,
         _pn_install_display_formatters,
     ]
     source = "\n\n".join(
@@ -246,6 +142,7 @@ def build_bootstrap_code(startup_statements: tuple[str, ...]) -> str:
     body = "\n".join(
         [
             "import math",
+            'globals().pop("table", None)',
             "",
             source,
             "",

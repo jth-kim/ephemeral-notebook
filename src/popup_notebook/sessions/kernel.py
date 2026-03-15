@@ -9,6 +9,7 @@ from pathlib import Path
 from queue import Empty
 from typing import Final
 
+from popup_notebook.sessions.bootstrap import build_bootstrap_code
 from popup_notebook.sessions.store import session_connection_path, session_log_path, session_store_dir
 
 
@@ -25,6 +26,10 @@ class ExecutionTimeoutError(RuntimeError):
     """Raised when a cell execution takes too long to respond."""
 
 
+class KernelBootstrapError(RuntimeError):
+    """Raised when popup-notebook bootstrap code cannot initialize the kernel session."""
+
+
 @dataclass(frozen=True)
 class KernelRuntime:
     pid: int
@@ -35,6 +40,7 @@ class KernelRuntime:
 class ExecutionResult:
     output: str
     execution_count: int | None
+    success: bool
 
 
 class KernelController:
@@ -134,6 +140,33 @@ class KernelController:
         return True
 
     def execute(self, connection_file: Path, code: str) -> ExecutionResult:
+        return self._execute_request(
+            connection_file,
+            code,
+            store_history=True,
+            silent=False,
+        )
+
+    def bootstrap(self, connection_file: Path, startup_statements: tuple[str, ...]) -> None:
+        result = self._execute_request(
+            connection_file,
+            build_bootstrap_code(startup_statements),
+            store_history=False,
+            silent=True,
+        )
+        if result.success:
+            return
+        message = result.output or "Failed to initialize popup-notebook kernel helpers."
+        raise KernelBootstrapError(message)
+
+    def _execute_request(
+        self,
+        connection_file: Path,
+        code: str,
+        *,
+        store_history: bool,
+        silent: bool,
+    ) -> ExecutionResult:
         from jupyter_client import BlockingKernelClient
 
         client = BlockingKernelClient(connection_file=str(connection_file))
@@ -141,8 +174,14 @@ class KernelController:
         client.start_channels()
         try:
             client.wait_for_ready(timeout=STARTUP_TIMEOUT)
-            message_id = client.execute(code, store_history=True, stop_on_error=True)
+            message_id = client.execute(
+                code,
+                store_history=store_history,
+                silent=silent,
+                stop_on_error=True,
+            )
             outputs: list[str] = []
+            success = True
 
             while True:
                 try:
@@ -167,6 +206,7 @@ class KernelController:
                     if rendered:
                         outputs.append(rendered)
                 elif msg_type == "error":
+                    success = False
                     traceback = content.get("traceback", [])
                     if traceback:
                         outputs.append("\n".join(str(line) for line in traceback))
@@ -189,13 +229,17 @@ class KernelController:
                 if execution_count_value is not None:
                     execution_count = int(execution_count_value)
                 if content.get("status") == "error" and not outputs:
+                    success = False
                     outputs.append(
                         f"{content.get('ename', 'Error')}: {content.get('evalue', '')}".rstrip()
                     )
+                elif content.get("status") == "error":
+                    success = False
 
             return ExecutionResult(
                 output="\n\n".join(part for part in outputs if part).strip(),
                 execution_count=execution_count,
+                success=success,
             )
         finally:
             client.stop_channels()

@@ -53,3 +53,22 @@ markdown_center = false
 output_max_lines = 12
 code_theme = "monokai"
 ```
+
+## Project Startup
+
+Per-project startup behavior can live in `pyproject.toml`:
+
+```toml
+[tool.popup-notebook]
+startup_imports = ["numpy as np", "pandas as pd"]
+startup = ["from math import sqrt"]
+```
+
+`startup_imports` expands to normal Python `import ...` statements. `startup` accepts arbitrary Python lines.
+
+## Built-in Helpers
+
+The kernel bootstrap installs two helpers:
+
+- `table(value)` for terminal-friendly tables from lists, dicts, pandas Series, and DataFrames
+- `plot(value)` for terminal-native text plots from numeric sequences or pandas Series

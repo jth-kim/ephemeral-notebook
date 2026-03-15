@@ -180,6 +180,42 @@ class SessionManagerTests(unittest.TestCase):
                     manager.detach(project.resolve(), token)
                     manager.kill(project.resolve())
 
+    def test_execute_cells_runs_batch_and_stops_on_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            project, _python = self._make_project(root, real_python=True)
+
+            with patch.dict("os.environ", {"XDG_STATE_HOME": str(root / "state")}):
+                with self._patched_context(project):
+                    manager = SessionManager()
+                    session, token = manager.attach(project)
+                    first_id = session.cells[0].id
+                    second = manager.insert_cell_after(project.resolve(), first_id)
+                    third = manager.insert_cell_after(project.resolve(), second.id if second else None)
+                    assert second is not None
+                    assert third is not None
+
+                    manager.update_cell_source(project.resolve(), first_id, "value = 10\nvalue")
+                    manager.update_cell_source(project.resolve(), second.id, "raise RuntimeError('boom')")
+                    manager.update_cell_source(project.resolve(), third.id, "value + 5")
+
+                    result = manager.execute_cells(
+                        project.resolve(),
+                        [first_id, second.id, third.id],
+                    )
+                    updated = manager.get(project.resolve())
+
+                    self.assertEqual(result.executed_cell_ids, (first_id, second.id))
+                    self.assertEqual(result.failed_cell_id, second.id)
+                    self.assertIsNotNone(updated)
+                    assert updated is not None
+                    self.assertIn("10", updated.cells[0].output)
+                    self.assertIn("RuntimeError", updated.cells[1].output)
+                    self.assertEqual(updated.cells[2].output, "")
+
+                    manager.detach(project.resolve(), token)
+                    manager.kill(project.resolve())
+
     def test_delete_cell_preserves_single_blank_notebook(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
@@ -290,6 +326,28 @@ class SessionManagerTests(unittest.TestCase):
                     self.assertIsNotNone(updated)
                     assert updated is not None
                     self.assertTrue(updated.cells[0].expanded)
+
+    def test_clear_cell_output_preserves_execution_count(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            project, _python = self._make_project(root)
+
+            with patch.dict("os.environ", {"XDG_STATE_HOME": str(root / "state")}):
+                with self._patched_context(project):
+                    manager = SessionManager()
+                    session = manager.get_or_create(project)
+                    session.cells[0].output = "hello"
+                    session.cells[0].execution_count = 3
+                    save_session_state(session)
+
+                    cleared = manager.clear_cell_output(project.resolve(), session.cells[0].id)
+                    updated = manager.get(project.resolve())
+
+                    self.assertTrue(cleared)
+                    self.assertIsNotNone(updated)
+                    assert updated is not None
+                    self.assertEqual(updated.cells[0].output, "")
+                    self.assertEqual(updated.cells[0].execution_count, 3)
 
     def test_execute_cell_recovers_missing_connection_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

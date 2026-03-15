@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from shutil import which
 import sys
+import tomllib
 
 
 @dataclass(frozen=True)
@@ -12,6 +13,11 @@ class ProjectContext:
     project_root: Path
     interpreter: Path
     interpreter_source: str
+
+
+@dataclass(frozen=True)
+class ProjectNotebookSettings:
+    startup_statements: tuple[str, ...] = ()
 
 
 def resolve_project_root(start: Path) -> Path:
@@ -62,6 +68,33 @@ def build_project_context(start: Path) -> ProjectContext:
     )
 
 
+def load_project_notebook_settings(project_root: Path) -> ProjectNotebookSettings:
+    """Load popup-notebook project settings from pyproject.toml when present."""
+    pyproject_path = project_root / "pyproject.toml"
+    if not pyproject_path.exists():
+        return ProjectNotebookSettings()
+
+    try:
+        payload = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return ProjectNotebookSettings()
+
+    tool_section = payload.get("tool", {})
+    if not isinstance(tool_section, dict):
+        return ProjectNotebookSettings()
+    notebook_section = tool_section.get("popup-notebook", {})
+    if not isinstance(notebook_section, dict):
+        return ProjectNotebookSettings()
+
+    startup_imports = _string_list(notebook_section.get("startup_imports"))
+    startup_statements = _string_list(notebook_section.get("startup"))
+    startup_statements.extend(_string_list(notebook_section.get("startup_code")))
+    imports_as_statements = [f"import {target}" for target in startup_imports]
+    return ProjectNotebookSettings(
+        startup_statements=tuple(imports_as_statements + startup_statements)
+    )
+
+
 def _find_ancestor_with(start: Path, marker: str) -> Path | None:
     current = start
     while True:
@@ -81,3 +114,9 @@ def _find_ancestor_python(start: Path) -> Path | None:
         if current.parent == current:
             return None
         current = current.parent
+
+
+def _string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str) and item.strip()]

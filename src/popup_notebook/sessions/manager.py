@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
 
-from popup_notebook.project import build_project_context
+from popup_notebook.project import build_project_context, load_project_notebook_settings
 from popup_notebook.sessions.kernel import KernelController
 from popup_notebook.sessions.models import Cell, CellKind, SessionState
 from popup_notebook.sessions.store import (
@@ -16,6 +17,12 @@ from popup_notebook.sessions.store import (
 
 class SessionAttachedError(RuntimeError):
     """Raised when a session already has an active UI attachment."""
+
+
+@dataclass(frozen=True)
+class BatchExecutionResult:
+    executed_cell_ids: tuple[str, ...]
+    failed_cell_id: str | None = None
 
 
 class SessionManager:
@@ -180,6 +187,9 @@ class SessionManager:
         return self._insert_cell(project_root, reference_cell_id, kind, before=False)
 
     def execute_cell(self, project_root: Path, cell_id: str) -> Cell | None:
+        batch_result = self.execute_cells(project_root, [cell_id])
+        if cell_id not in batch_result.executed_cell_ids:
+            return None
         with session_lock(project_root):
             session = load_session_state(project_root)
             if session is None:
@@ -187,42 +197,79 @@ class SessionManager:
             cell = self._find_cell(session, cell_id)
             if cell is None:
                 return None
-            source = cell.source
-            kind = cell.kind
+            return cell
+
+    def execute_cells(self, project_root: Path, cell_ids: list[str]) -> BatchExecutionResult:
+        with session_lock(project_root):
+            session = load_session_state(project_root)
+            if session is None:
+                return BatchExecutionResult(executed_cell_ids=())
+            cells = {
+                cell.id: cell
+                for cell in session.cells
+                if cell.id in cell_ids
+            }
+            execution_plan = [cells[cell_id] for cell_id in cell_ids if cell_id in cells]
+            if not execution_plan:
+                return BatchExecutionResult(executed_cell_ids=())
             controller = self._controller(session)
             existing_pid = session.kernel_pid
             existing_connection_file = session.connection_file
+            startup_statements = load_project_notebook_settings(
+                session.project_root
+            ).startup_statements
 
-        if kind == "markdown":
-            output = ""
-            execution_count = None
-        else:
+        runtime = None
+        if any(cell.kind == "python" for cell in execution_plan):
             runtime = controller.ensure_running(
                 existing_pid=existing_pid,
                 existing_connection_file=existing_connection_file,
             )
+            controller.bootstrap(runtime.connection_file, startup_statements)
             with session_lock(project_root):
                 session = load_session_state(project_root)
                 if session is None:
-                    return None
+                    return BatchExecutionResult(executed_cell_ids=())
                 session.kernel_pid = runtime.pid
                 session.connection_file = runtime.connection_file
                 save_session_state(session)
-            execution = controller.execute(runtime.connection_file, source)
-            output = execution.output
-            execution_count = execution.execution_count
 
-        with session_lock(project_root):
-            session = load_session_state(project_root)
-            if session is None:
-                return None
-            cell = self._find_cell(session, cell_id)
-            if cell is None:
-                return None
-            cell.output = output
-            cell.execution_count = execution_count
-            save_session_state(session)
-            return cell
+        executed_cell_ids: list[str] = []
+        failed_cell_id = None
+
+        for plan_cell in execution_plan:
+            if plan_cell.kind == "markdown":
+                output = ""
+                execution_count = None
+                success = True
+            else:
+                assert runtime is not None
+                execution = controller.execute(runtime.connection_file, plan_cell.source)
+                output = execution.output
+                execution_count = execution.execution_count
+                success = execution.success
+
+            with session_lock(project_root):
+                session = load_session_state(project_root)
+                if session is None:
+                    break
+                current_cell = self._find_cell(session, plan_cell.id)
+                if current_cell is None:
+                    break
+                current_cell.output = output
+                current_cell.execution_count = execution_count
+                current_cell.expanded = False
+                save_session_state(session)
+
+            executed_cell_ids.append(plan_cell.id)
+            if not success:
+                failed_cell_id = plan_cell.id
+                break
+
+        return BatchExecutionResult(
+            executed_cell_ids=tuple(executed_cell_ids),
+            failed_cell_id=failed_cell_id,
+        )
 
     def reset(self, project_root: Path) -> bool:
         with session_lock(project_root):
@@ -282,6 +329,19 @@ class SessionManager:
             existing_pid = session.kernel_pid
 
         return controller.interrupt(existing_pid)
+
+    def clear_cell_output(self, project_root: Path, cell_id: str) -> bool:
+        with session_lock(project_root):
+            session = load_session_state(project_root)
+            if session is None:
+                return False
+            cell = self._find_cell(session, cell_id)
+            if cell is None or not cell.output.strip():
+                return False
+            cell.output = ""
+            cell.expanded = False
+            save_session_state(session)
+            return True
 
     def delete_cell(self, project_root: Path, cell_id: str) -> str | None:
         with session_lock(project_root):

@@ -10,7 +10,7 @@ from typing import Iterable
 
 from popup_notebook.config import load_app_config
 from popup_notebook.project import build_project_context
-from popup_notebook.sessions.manager import SessionAttachedError, SessionManager
+from popup_notebook.sessions.manager import BatchExecutionResult, SessionAttachedError, SessionManager
 from popup_notebook.sessions.models import Cell
 from popup_notebook.tui.notebook import NotebookViewModel
 from popup_notebook.tui.widgets.cell import (
@@ -31,6 +31,8 @@ class DeletedCellSnapshot:
 @dataclass(frozen=True)
 class PendingExecution:
     cell_id: str
+    cell_ids: tuple[str, ...]
+    label: str
     move_to_next: bool
 
 
@@ -206,6 +208,7 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
                 "cell_markdown",
                 "cell_python",
                 "toggle_output",
+                "clear_output",
                 "copy_cell_source",
                 "undo_delete",
                 "enter_edit",
@@ -232,7 +235,13 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
                 self._clear_nav_sequence()
                 await self._move_selection(event.key)
                 return
-            normalized_key = self._normalize_nav_key(event.key)
+            normalized_key = None
+            if self._pending_nav_sequence == "r" and event.key in {"a", "b", "r"}:
+                normalized_key = event.key
+            elif self._pending_nav_sequence == "x" and event.key == "x":
+                normalized_key = event.key
+            else:
+                normalized_key = self._normalize_nav_key(event.key)
             if normalized_key is None:
                 if self._pending_nav_sequence and event.key == "escape":
                     event.stop()
@@ -302,6 +311,16 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
             if manager.toggle_cell_expanded(context.project_root, self.model.current_cell_id):
                 await self._sync_widgets(refocus=False)
 
+        async def action_clear_output(self) -> None:
+            if (
+                self.edit_mode
+                or self.model.current_cell_id is None
+                or self._pending_execution is not None
+            ):
+                return
+            if manager.clear_cell_output(context.project_root, self.model.current_cell_id):
+                await self._sync_widgets(refocus=False)
+
         def action_copy_cell_source(self) -> None:
             if self.edit_mode or self.model.current_cell_id is None:
                 return
@@ -320,6 +339,27 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
 
         async def action_run_and_move(self) -> None:
             await self._execute_current_cell(move_to_next=True)
+
+        async def action_run_all(self) -> None:
+            self.model.reload()
+            cell_ids = tuple(cell.id for cell in self.model.session.cells)
+            await self._execute_cell_batch(cell_ids, label="RUN ALL")
+
+        async def action_run_all_above(self) -> None:
+            self.model.reload()
+            current_index = self.model.current_index()
+            if current_index <= 0:
+                return
+            cell_ids = tuple(cell.id for cell in self.model.session.cells[:current_index])
+            await self._execute_cell_batch(cell_ids, label="RUN ABOVE")
+
+        async def action_run_all_below(self) -> None:
+            self.model.reload()
+            current_index = self.model.current_index()
+            if current_index < 0:
+                return
+            cell_ids = tuple(cell.id for cell in self.model.session.cells[current_index:])
+            await self._execute_cell_batch(cell_ids, label="RUN BELOW")
 
         async def action_select_up(self) -> None:
             await self._move_selection("up")
@@ -452,6 +492,22 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
                 self._clear_nav_sequence()
                 await self.action_restart_kernel()
                 return
+            if sequence == "rr":
+                self._clear_nav_sequence()
+                await self.action_run_all()
+                return
+            if sequence == "ra":
+                self._clear_nav_sequence()
+                await self.action_run_all_above()
+                return
+            if sequence == "rb":
+                self._clear_nav_sequence()
+                await self.action_run_all_below()
+                return
+            if sequence == "xx":
+                self._clear_nav_sequence()
+                await self.action_clear_output()
+                return
 
             self._pending_nav_sequence = key
             self._update_status()
@@ -474,7 +530,7 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
         def _normalize_nav_key(key: str) -> str | None:
             if key == "kp_0":
                 return "0"
-            if key in {"d", "i", "0"}:
+            if key in {"d", "i", "0", "r", "x"}:
                 return key
             return None
 
@@ -482,16 +538,33 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
             cell_id = self.model.current_cell_id
             if cell_id is None:
                 return
+            await self._execute_cell_batch((cell_id,), label="RUN", move_to_next=move_to_next)
+
+        async def _execute_cell_batch(
+            self,
+            cell_ids: tuple[str, ...],
+            *,
+            label: str,
+            move_to_next: bool = False,
+        ) -> None:
+            if not cell_ids:
+                return
             if self._pending_execution is not None:
                 self.notify("A cell is already running.", severity="warning")
                 return
 
-            self._pending_execution = PendingExecution(cell_id=cell_id, move_to_next=move_to_next)
+            current_cell_id = self.model.current_cell_id or cell_ids[0]
+            self._pending_execution = PendingExecution(
+                cell_id=current_cell_id,
+                cell_ids=cell_ids,
+                label=label,
+                move_to_next=move_to_next,
+            )
             self._execution_worker = self.run_worker(
-                lambda: manager.execute_cell(context.project_root, cell_id),
+                lambda: manager.execute_cells(context.project_root, list(cell_ids)),
                 name="execute-cell",
                 group="execution",
-                description=f"Execute {cell_id}",
+                description=f"{label} {len(cell_ids)} cell(s)",
                 exit_on_error=False,
                 exclusive=True,
                 thread=True,
@@ -631,12 +704,18 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
                 return
 
             result = message.worker.result
-            if result is None or pending_execution is None:
+            if not isinstance(result, BatchExecutionResult) or pending_execution is None:
                 self._apply_widget_state()
                 self.notify("Unable to execute current cell.", severity="error")
                 return
 
             await self._sync_widgets(refocus=False)
+
+            if result.failed_cell_id is not None:
+                self.model.current_cell_id = result.failed_cell_id
+                self._apply_widget_state()
+                self.notify("Execution stopped on error.", severity="warning")
+                return
 
             if not pending_execution.move_to_next:
                 self._apply_widget_state()
@@ -664,7 +743,7 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
             pending = f"Pending: {self._pending_nav_sequence}" if self._pending_nav_sequence else None
             location = context.project_root.name or str(context.project_root)
             interpreter = context.interpreter.name
-            running = "RUN" if self._pending_execution is not None else None
+            running = self._pending_execution.label if self._pending_execution is not None else None
             if config.ui.status_verbosity == "full":
                 status_parts = [
                     f"Project {context.project_root}",
@@ -695,6 +774,26 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
 
         def get_system_commands(self, screen: Screen) -> Iterable[SystemCommand]:
             yield from super().get_system_commands(screen)
+            yield SystemCommand(
+                "Run all cells",
+                "Execute every cell in notebook order and stop on the first error.",
+                lambda: self._queue_palette_action(self.action_run_all, "run-all"),
+            )
+            yield SystemCommand(
+                "Run all above",
+                "Execute cells above the current selection.",
+                lambda: self._queue_palette_action(self.action_run_all_above, "run-all-above"),
+            )
+            yield SystemCommand(
+                "Run all below",
+                "Execute the current cell and all cells below it.",
+                lambda: self._queue_palette_action(self.action_run_all_below, "run-all-below"),
+            )
+            yield SystemCommand(
+                "Clear current output",
+                "Clear the selected cell output without deleting the cell source.",
+                lambda: self._queue_palette_action(self.action_clear_output, "clear-output"),
+            )
             yield from self._shortcut_commands()
 
         def _shortcut_commands(self) -> Iterable[SystemCommand]:
@@ -736,6 +835,22 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
                     "o expands or collapses the current cell output in nav mode.",
                 ),
                 (
+                    "Shortcut: Run ranges",
+                    "rr runs all cells, ra runs all above, and rb runs the selected cell and everything below.",
+                ),
+                (
+                    "Shortcut: Clear output",
+                    "xx clears the current cell output in nav mode.",
+                ),
+                (
+                    "Helper: table(value)",
+                    "Render lists, dicts, pandas Series, or DataFrames as terminal-friendly tables.",
+                ),
+                (
+                    "Helper: plot(value)",
+                    "Render numeric sequences or pandas Series as terminal-native text plots.",
+                ),
+                (
                     "Shortcut: Kernel control",
                     "ii interrupts the kernel and 00 restarts it in nav mode.",
                 ),
@@ -754,6 +869,14 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
             ]
             for title, help_text in commands:
                 yield SystemCommand(title, help_text, lambda message=help_text: self.notify(message))
+
+        def _queue_palette_action(self, action, name: str) -> None:
+            self.run_worker(
+                action(),
+                name=name,
+                group="palette",
+                exit_on_error=False,
+            )
 
         def copy_to_clipboard(self, text: str) -> None:
             super().copy_to_clipboard(text)

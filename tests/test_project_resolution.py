@@ -5,7 +5,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from popup_notebook.project import build_project_context, resolve_interpreter, resolve_project_root
+from popup_notebook.project import (
+    build_project_context,
+    load_project_notebook_settings,
+    resolve_interpreter,
+    resolve_project_root,
+)
 
 
 class ProjectResolutionTests(unittest.TestCase):
@@ -88,6 +93,31 @@ class ProjectResolutionTests(unittest.TestCase):
 
             self.assertEqual(context.project_root, project.resolve())
             self.assertEqual(context.interpreter, project.resolve() / ".venv" / "bin" / "python")
+
+    def test_load_project_notebook_settings_reads_startup_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            project = Path(tmp_dir)
+            (project / "pyproject.toml").write_text(
+                """
+[tool.popup-notebook]
+startup_imports = ["numpy as np", "pandas as pd"]
+startup = ["from math import sqrt"]
+startup_code = ["GREETING = 'hi'"]
+""".strip(),
+                encoding="utf-8",
+            )
+
+            settings = load_project_notebook_settings(project)
+
+            self.assertEqual(
+                settings.startup_statements,
+                (
+                    "import numpy as np",
+                    "import pandas as pd",
+                    "from math import sqrt",
+                    "GREETING = 'hi'",
+                ),
+            )
 
 
 if __name__ == "__main__":

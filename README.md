@@ -68,7 +68,6 @@ startup = ["from math import sqrt"]
 
 ## Built-in Helpers
 
-The kernel bootstrap installs two helpers:
+The kernel bootstrap installs one helper:
 
 - `table(value)` for terminal-friendly tables from lists, dicts, pandas Series, and DataFrames
-- `plot(value)` for terminal-native text plots from numeric sequences or pandas Series

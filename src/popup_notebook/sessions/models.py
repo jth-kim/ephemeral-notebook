@@ -49,6 +49,8 @@ class SessionState:
     kernel_generation: int = 1
     kernel_pid: int | None = None
     connection_file: Path | None = None
+    bootstrapped_kernel_pid: int | None = None
+    bootstrap_version: int | None = None
     attached: bool = False
     attachment_token: str | None = None
     cells: list[Cell] = field(default_factory=list)
@@ -61,6 +63,8 @@ class SessionState:
             "kernel_generation": self.kernel_generation,
             "kernel_pid": self.kernel_pid,
             "connection_file": str(self.connection_file) if self.connection_file else None,
+            "bootstrapped_kernel_pid": self.bootstrapped_kernel_pid,
+            "bootstrap_version": self.bootstrap_version,
             "attached": self.attached,
             "attachment_token": self.attachment_token,
             "cells": [cell.to_dict() for cell in self.cells],
@@ -78,6 +82,14 @@ class SessionState:
             kernel_pid=int(data["kernel_pid"]) if data.get("kernel_pid") is not None else None,
             connection_file=(
                 Path(str(data["connection_file"])) if data.get("connection_file") is not None else None
+            ),
+            bootstrapped_kernel_pid=(
+                int(data["bootstrapped_kernel_pid"])
+                if data.get("bootstrapped_kernel_pid") is not None
+                else None
+            ),
+            bootstrap_version=(
+                int(data["bootstrap_version"]) if data.get("bootstrap_version") is not None else None
             ),
             attached=bool(data.get("attached", False)),
             attachment_token=(

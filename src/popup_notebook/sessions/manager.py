@@ -5,6 +5,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from popup_notebook.project import build_project_context, load_project_notebook_settings
+from popup_notebook.sessions.bootstrap import BOOTSTRAP_VERSION
 from popup_notebook.sessions.kernel import KernelController
 from popup_notebook.sessions.models import Cell, CellKind, SessionState
 from popup_notebook.sessions.store import (
@@ -225,14 +226,29 @@ class SessionManager:
                 existing_pid=existing_pid,
                 existing_connection_file=existing_connection_file,
             )
-            controller.bootstrap(runtime.connection_file, startup_statements)
             with session_lock(project_root):
                 session = load_session_state(project_root)
                 if session is None:
                     return BatchExecutionResult(executed_cell_ids=())
                 session.kernel_pid = runtime.pid
                 session.connection_file = runtime.connection_file
+                should_bootstrap = (
+                    session.bootstrapped_kernel_pid != runtime.pid
+                    or session.bootstrap_version != BOOTSTRAP_VERSION
+                )
+                if should_bootstrap:
+                    session.bootstrapped_kernel_pid = None
+                    session.bootstrap_version = None
                 save_session_state(session)
+            if should_bootstrap:
+                controller.bootstrap(runtime.connection_file, startup_statements)
+                with session_lock(project_root):
+                    session = load_session_state(project_root)
+                    if session is None:
+                        return BatchExecutionResult(executed_cell_ids=())
+                    session.bootstrapped_kernel_pid = runtime.pid
+                    session.bootstrap_version = BOOTSTRAP_VERSION
+                    save_session_state(session)
 
         executed_cell_ids: list[str] = []
         failed_cell_id = None
@@ -292,6 +308,8 @@ class SessionManager:
             session.kernel_generation += 1
             session.kernel_pid = runtime.pid
             session.connection_file = runtime.connection_file
+            session.bootstrapped_kernel_pid = None
+            session.bootstrap_version = None
             save_session_state(session)
             return True
 
@@ -316,6 +334,8 @@ class SessionManager:
             session.kernel_generation += 1
             session.kernel_pid = runtime.pid
             session.connection_file = runtime.connection_file
+            session.bootstrapped_kernel_pid = None
+            session.bootstrap_version = None
             session.cells = [self._blank_cell()]
             save_session_state(session)
             return True

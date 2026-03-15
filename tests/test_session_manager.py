@@ -216,6 +216,28 @@ class SessionManagerTests(unittest.TestCase):
                     manager.detach(project.resolve(), token)
                     manager.kill(project.resolve())
 
+    def test_execute_cell_bootstraps_only_once_per_live_kernel(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            project, _python = self._make_project(root, real_python=True)
+
+            with patch.dict("os.environ", {"XDG_STATE_HOME": str(root / "state")}):
+                with self._patched_context(project):
+                    manager = SessionManager()
+                    session, token = manager.attach(project)
+                    cell_id = session.cells[0].id
+                    manager.update_cell_source(project.resolve(), cell_id, "1 + 1")
+
+                    with patch("popup_notebook.sessions.manager.KernelController.bootstrap") as bootstrap:
+                        bootstrap.return_value = None
+                        manager.execute_cell(project.resolve(), cell_id)
+                        manager.execute_cell(project.resolve(), cell_id)
+
+                    self.assertEqual(bootstrap.call_count, 1)
+
+                    manager.detach(project.resolve(), token)
+                    manager.kill(project.resolve())
+
     def test_delete_cell_preserves_single_blank_notebook(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

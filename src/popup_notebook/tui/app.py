@@ -847,10 +847,6 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
                     "Render lists, dicts, pandas Series, or DataFrames as terminal-friendly tables.",
                 ),
                 (
-                    "Helper: plot(value)",
-                    "Render numeric sequences or pandas Series as terminal-native text plots.",
-                ),
-                (
                     "Shortcut: Kernel control",
                     "ii interrupts the kernel and 00 restarts it in nav mode.",
                 ),

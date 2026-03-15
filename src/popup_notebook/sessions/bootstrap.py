@@ -5,7 +5,7 @@ import json
 import textwrap
 
 
-BOOTSTRAP_VERSION = 1
+BOOTSTRAP_VERSION = 2
 
 
 class _PNRenderable:
@@ -207,120 +207,6 @@ def table(value, max_rows=20, max_cols=8, max_width=24):
     )
 
 
-def _pn_coerce_plot_values(value):
-    try:
-        import pandas as _pn_pd
-    except Exception:
-        _pn_pd = None
-
-    if _pn_pd is not None:
-        if isinstance(value, _pn_pd.DataFrame):
-            if len(value.columns) == 0:
-                return []
-            value = value.iloc[:, 0].tolist()
-        elif isinstance(value, _pn_pd.Series):
-            value = value.tolist()
-
-    if hasattr(value, "tolist") and not isinstance(value, (list, tuple, dict, str, bytes)):
-        value = value.tolist()
-
-    if isinstance(value, dict):
-        value = list(value.values())
-
-    if not isinstance(value, (list, tuple)):
-        raise TypeError("plot() expects a sequence, pandas Series, or single-column DataFrame.")
-
-    if value and isinstance(value[0], (list, tuple)) and len(value[0]) >= 2:
-        value = [item[1] for item in value]
-
-    numbers = []
-    for item in value:
-        try:
-            number = float(item)
-        except Exception:
-            continue
-        if math.isfinite(number):
-            numbers.append(number)
-    return numbers
-
-
-def _pn_resample(values, width):
-    if not values:
-        return []
-    if len(values) == 1:
-        return [values[0]] * width
-
-    scale = (len(values) - 1) / max(1, width - 1)
-    sampled = []
-    for index in range(width):
-        position = index * scale
-        left = int(math.floor(position))
-        right = min(left + 1, len(values) - 1)
-        fraction = position - left
-        sampled.append(values[left] + (values[right] - values[left]) * fraction)
-    return sampled
-
-
-def _pn_render_plot(values, width=60, height=12):
-    if not values:
-        return "(no plottable numeric data)"
-
-    width = max(8, int(width))
-    height = max(4, int(height))
-    sampled = _pn_resample(values, width)
-    min_value = min(sampled)
-    max_value = max(sampled)
-    span = max_value - min_value
-    midpoint = (min_value + max_value) / 2.0
-    rows = [[" "] * len(sampled) for _ in range(height)]
-
-    previous_row = None
-    for column, value in enumerate(sampled):
-        if span == 0:
-            row = height // 2
-        else:
-            ratio = (value - min_value) / span
-            row = height - 1 - int(round(ratio * (height - 1)))
-        if previous_row is not None:
-            if row == previous_row and column > 0 and rows[row][column - 1] == " ":
-                rows[row][column - 1] = "─"
-            elif column > 0:
-                step = 1 if row > previous_row else -1
-                for fill in range(previous_row + step, row, step):
-                    if rows[fill][column - 1] == " ":
-                        rows[fill][column - 1] = "│"
-                connector = "╲" if row > previous_row else "╱"
-                if rows[row][column - 1] == " ":
-                    rows[row][column - 1] = connector
-        rows[row][column] = "●"
-        previous_row = row
-
-    label_width = max(
-        len(f"{max_value:.3g}"),
-        len(f"{min_value:.3g}"),
-        len(f"{midpoint:.3g}"),
-    )
-    lines = []
-    for row_index, row in enumerate(rows):
-        if row_index == 0:
-            label = f"{max_value:.3g}".rjust(label_width)
-        elif row_index == height // 2:
-            label = f"{midpoint:.3g}".rjust(label_width)
-        elif row_index == height - 1:
-            label = f"{min_value:.3g}".rjust(label_width)
-        else:
-            label = " " * label_width
-        lines.append(f"{label} │{''.join(row)}")
-    lines.append(f"{' ' * label_width} └{'─' * len(sampled)}")
-    lines.append(f"n={len(values)}")
-    return "\n".join(lines)
-
-
-def plot(value, width=60, height=12):
-    values = _pn_coerce_plot_values(value)
-    return _PNRenderable(_pn_render_plot(values, width=width, height=height))
-
-
 def _pn_install_display_formatters(ipython_shell):
     try:
         import pandas as _pn_pd
@@ -351,10 +237,6 @@ def build_bootstrap_code(startup_statements: tuple[str, ...]) -> str:
         _pn_format_series,
         _pn_format_generic_table,
         table,
-        _pn_coerce_plot_values,
-        _pn_resample,
-        _pn_render_plot,
-        plot,
         _pn_install_display_formatters,
     ]
     source = "\n\n".join(

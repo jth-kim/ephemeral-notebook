@@ -13,6 +13,7 @@ from popup_notebook.sessions.store import session_connection_path, session_log_p
 
 
 STARTUP_TIMEOUT: Final[float] = 10.0
+EXECUTION_TIMEOUT: Final[float] = 60.0
 SHUTDOWN_TIMEOUT: Final[float] = 5.0
 
 
@@ -20,10 +21,20 @@ class KernelLaunchError(RuntimeError):
     """Raised when the project interpreter cannot start an IPython kernel."""
 
 
+class ExecutionTimeoutError(RuntimeError):
+    """Raised when a cell execution takes too long to respond."""
+
+
 @dataclass(frozen=True)
 class KernelRuntime:
     pid: int
     connection_file: Path
+
+
+@dataclass(frozen=True)
+class ExecutionResult:
+    output: str
+    execution_count: int | None
 
 
 class KernelController:
@@ -45,6 +56,8 @@ class KernelController:
         if existing_pid is not None and existing_connection_file is not None:
             if self.is_alive(existing_pid) and existing_connection_file.exists():
                 return KernelRuntime(pid=existing_pid, connection_file=existing_connection_file)
+        if existing_pid is not None or existing_connection_file is not None:
+            self.shutdown(existing_pid, existing_connection_file)
         return self.start()
 
     def start(self) -> KernelRuntime:
@@ -109,7 +122,18 @@ class KernelController:
         if connection_file is not None and connection_file.exists():
             connection_file.unlink()
 
-    def execute(self, connection_file: Path, code: str) -> str:
+    def interrupt(self, pid: int | None) -> bool:
+        if pid is None or not self.is_alive(pid):
+            return False
+        try:
+            os.killpg(pid, signal.SIGINT)
+        except PermissionError:
+            os.kill(pid, signal.SIGINT)
+        except ProcessLookupError:
+            return False
+        return True
+
+    def execute(self, connection_file: Path, code: str) -> ExecutionResult:
         from jupyter_client import BlockingKernelClient
 
         client = BlockingKernelClient(connection_file=str(connection_file))
@@ -121,7 +145,13 @@ class KernelController:
             outputs: list[str] = []
 
             while True:
-                message = client.get_iopub_msg(timeout=STARTUP_TIMEOUT)
+                try:
+                    message = client.get_iopub_msg(timeout=EXECUTION_TIMEOUT)
+                except Empty as exc:
+                    raise ExecutionTimeoutError(
+                        "Execution timed out after 60s. The kernel may still be running; "
+                        "wait, reopen the popup, or interrupt with ii."
+                    ) from exc
                 if message.get("parent_header", {}).get("msg_id") != message_id:
                     continue
 
@@ -148,18 +178,25 @@ class KernelController:
                     break
 
             try:
-                reply = client.get_shell_msg(timeout=STARTUP_TIMEOUT)
+                reply = client.get_shell_msg(timeout=EXECUTION_TIMEOUT)
             except Empty:
                 reply = None
 
+            execution_count = None
             if reply is not None:
                 content = reply.get("content", {})
+                execution_count_value = content.get("execution_count")
+                if execution_count_value is not None:
+                    execution_count = int(execution_count_value)
                 if content.get("status") == "error" and not outputs:
                     outputs.append(
                         f"{content.get('ename', 'Error')}: {content.get('evalue', '')}".rstrip()
                     )
 
-            return "\n\n".join(part for part in outputs if part).strip()
+            return ExecutionResult(
+                output="\n\n".join(part for part in outputs if part).strip(),
+                execution_count=execution_count,
+            )
         finally:
             client.stop_channels()
 

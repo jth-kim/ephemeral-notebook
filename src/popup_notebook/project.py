@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from shutil import which
+import sys
 
 
 @dataclass(frozen=True)
@@ -37,6 +38,10 @@ def resolve_interpreter(start: Path, project_root: Path) -> tuple[Path, str]:
     ancestor_venv = _find_ancestor_python(start)
     if ancestor_venv is not None:
         return ancestor_venv, "ancestor .venv"
+
+    current_runtime = Path(sys.executable) if sys.executable else None
+    if current_runtime is not None and current_runtime.exists():
+        return current_runtime, "current runtime"
 
     system_python = which("python3")
     if system_python is None:

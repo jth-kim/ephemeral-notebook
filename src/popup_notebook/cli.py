@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import typer
@@ -47,19 +48,27 @@ def open(
     height: str = typer.Option("80%", "--height", help="Popup height."),
     x: str = typer.Option("C", "--x", help="Popup x position."),
     y: str = typer.Option("C", "--y", help="Popup y position."),
+    key_debug: bool = typer.Option(False, "--key-debug", help="Write raw key input to keys.log."),
 ) -> None:
     """Open the scratchpad UI, using a tmux popup when possible."""
+    if key_debug:
+        _prepare_key_debug(cwd.resolve())
     geometry = PopupGeometry(width=width, height=height, x=x, y=y)
     if in_tmux():
-        launch_tmux_popup(cwd.resolve(), geometry)
+        launch_tmux_popup(cwd.resolve(), geometry, key_debug=key_debug)
         return
-    run_tui(cwd.resolve())
+    run_tui(cwd.resolve(), key_debug=key_debug)
 
 
 @app.command("ui", hidden=True)
-def ui(cwd: Path = typer.Option(Path.cwd(), "--cwd", help="Working directory for the UI.")) -> None:
+def ui(
+    cwd: Path = typer.Option(Path.cwd(), "--cwd", help="Working directory for the UI."),
+    key_debug: bool = typer.Option(False, "--key-debug", help="Write raw key input to keys.log."),
+) -> None:
     """Internal entrypoint for the TUI client."""
-    run_tui(cwd.resolve())
+    if key_debug:
+        _enable_key_debug()
+    run_tui(cwd.resolve(), key_debug=key_debug)
 
 
 @app.command()
@@ -93,6 +102,18 @@ def kill(cwd: Path = typer.Option(Path.cwd(), "--cwd", help="Working directory t
         console.print(f"Killed session for {context.project_root}")
         return
     console.print(f"No existing session for {context.project_root}")
+
+
+def _prepare_key_debug(cwd: Path) -> None:
+    _enable_key_debug()
+    key_log = cwd / "keys.log"
+    if key_log.exists():
+        key_log.unlink()
+
+
+def _enable_key_debug() -> None:
+    os.environ["TEXTUAL_DEBUG"] = "1"
+    os.environ["POPUP_NOTEBOOK_KEY_DEBUG"] = "1"
 
 
 if __name__ == "__main__":

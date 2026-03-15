@@ -1,19 +1,89 @@
 from __future__ import annotations
 
-from textual.containers import Vertical
+import textwrap
+
+from textual import events
+from textual.containers import VerticalGroup
 from textual.message import Message
 from textual.reactive import reactive
 from textual.widgets import Static, TextArea
 
 from popup_notebook.sessions.models import Cell
 
+RUN_STAY_KEYS = ("ctrl+r",)
 
-class CellWidget(Vertical):
-    """Notebook cell widget with inline editing and output display."""
 
-    class Focused(Message):
+class NotebookTextArea(TextArea):
+    """TextArea with notebook-oriented key events."""
+
+    class ExitEdit(Message):
         def __init__(self, cell_id: str) -> None:
             self.cell_id = cell_id
+            super().__init__()
+
+    class RunRequested(Message):
+        def __init__(self, cell_id: str, *, move_to_next: bool) -> None:
+            self.cell_id = cell_id
+            self.move_to_next = move_to_next
+            super().__init__()
+
+    class MoveToNeighbor(Message):
+        def __init__(self, cell_id: str, *, direction: str) -> None:
+            self.cell_id = cell_id
+            self.direction = direction
+            super().__init__()
+
+    def __init__(self, cell_id: str, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.cell_id = cell_id
+
+    async def _on_key(self, event: events.Key) -> None:
+        if event.key == "escape":
+            event.stop()
+            event.prevent_default()
+            self.post_message(self.ExitEdit(self.cell_id))
+            return
+
+        if event.key in RUN_STAY_KEYS:
+            event.stop()
+            event.prevent_default()
+            self.post_message(self.RunRequested(self.cell_id, move_to_next=False))
+            return
+
+        if event.key == "up":
+            current = self.cursor_location
+            if self.get_cursor_up_location() == current:
+                event.stop()
+                event.prevent_default()
+                self.post_message(self.MoveToNeighbor(self.cell_id, direction="up"))
+                return
+
+        if event.key == "down":
+            current = self.cursor_location
+            if self.get_cursor_down_location() == current:
+                event.stop()
+                event.prevent_default()
+                self.post_message(self.MoveToNeighbor(self.cell_id, direction="down"))
+                return
+
+        await super()._on_key(event)
+
+
+class CellWidget(VerticalGroup):
+    """Notebook cell widget with inline editing and output display."""
+
+    can_focus = True
+
+    class Focused(Message):
+        def __init__(self, cell_id: str, *, edit_mode: bool) -> None:
+            self.cell_id = cell_id
+            self.edit_mode = edit_mode
+            super().__init__()
+
+    class SelectNeighbor(Message):
+        def __init__(self, cell_id: str, *, direction: str) -> None:
+            self.cell_id = cell_id
+            self.direction = direction
             super().__init__()
 
     class SourceChanged(Message):
@@ -24,29 +94,54 @@ class CellWidget(Vertical):
 
     cell_kind = reactive("python")
     is_current = reactive(False)
+    in_edit_mode = reactive(False)
 
-    def __init__(self, cell: Cell, *, current: bool = False) -> None:
+    def __init__(self, cell: Cell, *, current: bool = False, edit_mode: bool = False) -> None:
         super().__init__(id=f"cell-{cell.id}", classes="cell")
         self.cell = cell
-        self._header = Static(classes="cell-header")
-        self._editor = TextArea(
+        self._editor = NotebookTextArea(
+            cell.id,
             text=cell.source,
-            language="python" if cell.kind == "python" else None,
+            language=cell.kind if cell.kind in {"python", "markdown"} else None,
             show_line_numbers=False,
             soft_wrap=True,
             id=f"editor-{cell.id}",
+            tab_behavior="indent",
         )
         self._output = Static(self._render_output(cell.output), classes="cell-output")
         self.cell_kind = cell.kind
         self.is_current = current
+        self.in_edit_mode = edit_mode
 
     def compose(self):
-        yield self._header
         yield self._editor
         yield self._output
 
     def on_mount(self) -> None:
+        self.call_after_refresh(self._update_editor_height)
         self._refresh()
+
+    def on_focus(self) -> None:
+        self.post_message(self.Focused(self.cell.id, edit_mode=False))
+
+    async def _on_key(self, event: events.Key) -> None:
+        if self.in_edit_mode:
+            await super()._on_key(event)
+            return
+
+        if event.key == "up":
+            event.stop()
+            event.prevent_default()
+            self.post_message(self.SelectNeighbor(self.cell.id, direction="up"))
+            return
+
+        if event.key == "down":
+            event.stop()
+            event.prevent_default()
+            self.post_message(self.SelectNeighbor(self.cell.id, direction="down"))
+            return
+
+        await super()._on_key(event)
 
     def watch_cell_kind(self) -> None:
         self._refresh()
@@ -54,39 +149,95 @@ class CellWidget(Vertical):
     def watch_is_current(self) -> None:
         self._refresh()
 
+    def watch_in_edit_mode(self) -> None:
+        self._refresh()
+
     def on_text_area_changed(self, event: TextArea.Changed) -> None:
-        if event.text_area is self._editor:
-            self.post_message(self.SourceChanged(self.cell.id, self._editor.text))
+        if event.text_area is not self._editor:
+            return
+        self.post_message(self.SourceChanged(self.cell.id, self._editor.text))
+        self.call_after_refresh(self._update_editor_height)
 
     def on_text_area_focus(self, _event) -> None:
-        self.post_message(self.Focused(self.cell.id))
+        self.post_message(self.Focused(self.cell.id, edit_mode=True))
+
+    def on_resize(self) -> None:
+        self.call_after_refresh(self._update_editor_height)
+
+    def on_mouse_down(self, event: events.MouseDown) -> None:
+        if self._mouse_targets_editor(event.widget):
+            return
+        if bool(getattr(self.app, "edit_mode", False)):
+            self._editor.focus()
+            return
+        self.focus()
 
     def focus_editor(self) -> None:
         self._editor.focus()
 
+    def focus_cell(self) -> None:
+        self.focus()
+
     def set_current(self, current: bool) -> None:
         self.is_current = current
+
+    def set_edit_mode(self, edit_mode: bool) -> None:
+        self.in_edit_mode = edit_mode
 
     def sync_from_cell(self, cell: Cell) -> None:
         self.cell = cell
         self.cell_kind = cell.kind
         if self._editor.text != cell.source:
             self._editor.load_text(cell.source)
-        self._editor.language = "python" if cell.kind == "python" else None
+        self._editor.language = cell.kind if cell.kind in {"python", "markdown"} else None
         self._output.update(self._render_output(cell.output))
+        self.call_after_refresh(self._update_editor_height)
         self._refresh()
 
     def _refresh(self) -> None:
-        if not hasattr(self, "_header"):
-            return
         kind_label = "Python" if self.cell_kind == "python" else "Markdown"
-        marker = "Active" if self.is_current else "Cell"
-        self.border_title = f" {marker} · {kind_label} "
-        self._header.update(f"{kind_label} cell")
+        marker = "Editing" if self.in_edit_mode else ("Selected" if self.is_current else "")
+        execution = ""
+        if self.cell.execution_count is not None and self.cell_kind == "python":
+            execution = f" [{self.cell.execution_count}]"
+        title_parts = [part for part in (marker, f"{kind_label}{execution}") if part]
+        self.border_title = f" {' · '.join(title_parts)} "
+        self._editor.read_only = not self.in_edit_mode
+        self._editor.show_cursor = self.in_edit_mode
         self.set_class(self.is_current, "current")
-        has_output = bool(self.cell.output.strip())
-        self._output.display = has_output
+        self.set_class(self.in_edit_mode, "editing")
+        self.set_class(self.cell_kind == "python", "python")
+        self.set_class(self.cell_kind == "markdown", "markdown")
+        self._output.display = bool(self.cell.output.strip())
 
     @staticmethod
     def _render_output(output: str) -> str:
         return output.rstrip() if output.strip() else ""
+
+    def _mouse_targets_editor(self, widget) -> bool:
+        current = widget
+        while current is not None:
+            if current is self._editor:
+                return True
+            current = getattr(current, "parent", None)
+        return False
+
+    def _update_editor_height(self) -> None:
+        wrap_width = max(
+            1,
+            getattr(self._editor, "wrap_width", 0) or self._editor.content_region.width or 0,
+        )
+        if wrap_width <= 1:
+            height = max(1, self._editor.text.count("\n") + 1)
+        else:
+            height = 0
+            for line in self._editor.text.split("\n"):
+                expanded = line.expandtabs(self._editor.indent_width)
+                wrapped = textwrap.wrap(
+                    expanded,
+                    width=wrap_width,
+                    drop_whitespace=False,
+                    replace_whitespace=False,
+                )
+                height += len(wrapped) or 1
+        self._editor.styles.height = height

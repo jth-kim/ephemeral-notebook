@@ -15,6 +15,7 @@ class Cell:
     source: str = ""
     output: str = ""
     expanded: bool = False
+    execution_count: int | None = None
 
     def to_dict(self) -> dict[str, str | bool]:
         return {
@@ -23,6 +24,7 @@ class Cell:
             "source": self.source,
             "output": self.output,
             "expanded": self.expanded,
+            "execution_count": self.execution_count,
         }
 
     @classmethod
@@ -33,6 +35,9 @@ class Cell:
             source=str(data.get("source", "")),
             output=str(data.get("output", "")),
             expanded=bool(data.get("expanded", False)),
+            execution_count=(
+                int(data["execution_count"]) if data.get("execution_count") is not None else None
+            ),
         )
 
 

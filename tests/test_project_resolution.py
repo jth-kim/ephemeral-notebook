@@ -53,10 +53,24 @@ class ProjectResolutionTests(unittest.TestCase):
             self.assertEqual(interpreter, python)
             self.assertEqual(source, "project .venv")
 
+    def test_falls_back_to_current_runtime_before_system_python(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cwd = Path(tmp_dir)
+            runtime = cwd / "runtime-python"
+            runtime.write_text("", encoding="utf-8")
+            with patch("popup_notebook.project.sys.executable", str(runtime)):
+                interpreter, source = resolve_interpreter(cwd, cwd)
+
+            self.assertEqual(interpreter, runtime)
+            self.assertEqual(source, "current runtime")
+
     def test_falls_back_to_system_python(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             cwd = Path(tmp_dir)
-            with patch("popup_notebook.project.which", return_value="/usr/bin/python3"):
+            with (
+                patch("popup_notebook.project.sys.executable", ""),
+                patch("popup_notebook.project.which", return_value="/usr/bin/python3"),
+            ):
                 interpreter, source = resolve_interpreter(cwd, cwd)
 
             self.assertEqual(interpreter, Path("/usr/bin/python3"))

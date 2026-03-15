@@ -22,6 +22,10 @@ class NotebookViewModel:
         self.session = session
         if self.current_cell_id is None and session.cells:
             self.current_cell_id = session.cells[0].id
+        elif self.current_cell_id is not None and all(
+            cell.id != self.current_cell_id for cell in session.cells
+        ):
+            self.current_cell_id = session.cells[0].id if session.cells else None
         return session
 
     def current_index(self) -> int:

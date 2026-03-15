@@ -147,6 +147,7 @@ class SessionManager:
             cell.kind = kind
             if kind == "markdown":
                 cell.output = ""
+                cell.execution_count = None
             save_session_state(session)
             return True
 
@@ -174,17 +175,30 @@ class SessionManager:
             cell = self._find_cell(session, cell_id)
             if cell is None:
                 return None
-            if session.connection_file is None:
-                return None
             source = cell.source
             kind = cell.kind
             controller = self._controller(session)
-            connection_file = session.connection_file
+            existing_pid = session.kernel_pid
+            existing_connection_file = session.connection_file
 
         if kind == "markdown":
             output = ""
+            execution_count = None
         else:
-            output = controller.execute(connection_file, source)
+            runtime = controller.ensure_running(
+                existing_pid=existing_pid,
+                existing_connection_file=existing_connection_file,
+            )
+            with session_lock(project_root):
+                session = load_session_state(project_root)
+                if session is None:
+                    return None
+                session.kernel_pid = runtime.pid
+                session.connection_file = runtime.connection_file
+                save_session_state(session)
+            execution = controller.execute(runtime.connection_file, source)
+            output = execution.output
+            execution_count = execution.execution_count
 
         with session_lock(project_root):
             session = load_session_state(project_root)
@@ -194,6 +208,7 @@ class SessionManager:
             if cell is None:
                 return None
             cell.output = output
+            cell.execution_count = execution_count
             save_session_state(session)
             return cell
 
@@ -246,6 +261,65 @@ class SessionManager:
             save_session_state(session)
             return True
 
+    def interrupt_kernel(self, project_root: Path) -> bool:
+        with session_lock(project_root):
+            session = load_session_state(project_root)
+            if session is None:
+                return False
+            controller = self._controller(session)
+            existing_pid = session.kernel_pid
+
+        return controller.interrupt(existing_pid)
+
+    def delete_cell(self, project_root: Path, cell_id: str) -> str | None:
+        with session_lock(project_root):
+            session = load_session_state(project_root)
+            if session is None:
+                return None
+
+            index = next(
+                (position for position, cell in enumerate(session.cells) if cell.id == cell_id),
+                None,
+            )
+            if index is None:
+                return None
+
+            if len(session.cells) == 1:
+                session.cells = [self._blank_cell()]
+                next_cell_id = session.cells[0].id
+            else:
+                del session.cells[index]
+                next_index = min(index, len(session.cells) - 1)
+                next_cell_id = session.cells[next_index].id
+
+            save_session_state(session)
+            return next_cell_id
+
+    def restore_cell(
+        self,
+        project_root: Path,
+        cell: Cell,
+        index: int,
+        *,
+        replace_placeholder: bool = False,
+    ) -> str | None:
+        with session_lock(project_root):
+            session = load_session_state(project_root)
+            if session is None:
+                return None
+
+            restored = Cell.from_dict(cell.to_dict())
+            if replace_placeholder and len(session.cells) == 1 and self._is_blank_cell(
+                session.cells[0]
+            ):
+                session.cells[0] = restored
+            else:
+                insert_at = max(0, min(index, len(session.cells)))
+                session.cells.insert(insert_at, restored)
+
+            save_session_state(session)
+            return restored.id
+
     def kill(self, project_root: Path) -> bool:
         with session_lock(project_root):
             session = load_session_state(project_root)
@@ -278,6 +352,15 @@ class SessionManager:
             if cell.id == cell_id:
                 return cell
         return None
+
+    @staticmethod
+    def _is_blank_cell(cell: Cell) -> bool:
+        return (
+            cell.kind == "python"
+            and cell.source == ""
+            and cell.output == ""
+            and cell.execution_count is None
+        )
 
     def _insert_cell(
         self,

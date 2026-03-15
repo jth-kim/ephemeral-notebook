@@ -163,6 +163,7 @@ class SessionManagerTests(unittest.TestCase):
                     self.assertIsNotNone(executed)
                     assert executed is not None
                     self.assertIn("2", executed.output)
+                    self.assertEqual(executed.execution_count, 1)
 
                     inserted = manager.insert_cell_after(project.resolve(), cell_id)
                     self.assertIsNotNone(inserted)
@@ -174,6 +175,118 @@ class SessionManagerTests(unittest.TestCase):
                     assert updated is not None
                     self.assertEqual(len(updated.cells), 2)
                     self.assertEqual(updated.cells[1].kind, "markdown")
+                    self.assertIsNone(updated.cells[1].execution_count)
+
+                    manager.detach(project.resolve(), token)
+                    manager.kill(project.resolve())
+
+    def test_delete_cell_preserves_single_blank_notebook(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            project, _python = self._make_project(root)
+
+            with patch.dict("os.environ", {"XDG_STATE_HOME": str(root / "state")}):
+                with self._patched_context(project):
+                    manager = SessionManager()
+                    session = manager.get_or_create(project)
+                    remaining = manager.delete_cell(project.resolve(), session.cells[0].id)
+
+                    updated = manager.get(project.resolve())
+
+                    self.assertIsNotNone(remaining)
+                    self.assertIsNotNone(updated)
+                    assert updated is not None
+                    self.assertEqual(len(updated.cells), 1)
+                    self.assertEqual(updated.cells[0].kind, "python")
+                    self.assertEqual(updated.cells[0].id, remaining)
+
+    def test_restore_cell_replaces_placeholder_after_last_delete(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            project, _python = self._make_project(root)
+
+            with patch.dict("os.environ", {"XDG_STATE_HOME": str(root / "state")}):
+                with self._patched_context(project):
+                    manager = SessionManager()
+                    session = manager.get_or_create(project)
+                    deleted = session.cells[0]
+                    manager.delete_cell(project.resolve(), deleted.id)
+
+                    restored_id = manager.restore_cell(
+                        project.resolve(),
+                        deleted,
+                        0,
+                        replace_placeholder=True,
+                    )
+                    updated = manager.get(project.resolve())
+
+                    self.assertEqual(restored_id, deleted.id)
+                    self.assertIsNotNone(updated)
+                    assert updated is not None
+                    self.assertEqual(len(updated.cells), 1)
+                    self.assertEqual(updated.cells[0].id, deleted.id)
+
+    def test_restore_cell_reinserts_deleted_cell_at_original_index(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            project, _python = self._make_project(root)
+
+            with patch.dict("os.environ", {"XDG_STATE_HOME": str(root / "state")}):
+                with self._patched_context(project):
+                    manager = SessionManager()
+                    session = manager.get_or_create(project)
+                    first = session.cells[0]
+                    second = manager.insert_cell_after(project.resolve(), first.id)
+                    assert second is not None
+                    manager.update_cell_source(project.resolve(), first.id, "first")
+                    manager.update_cell_source(project.resolve(), second.id, "second")
+
+                    manager.delete_cell(project.resolve(), first.id)
+                    restored_id = manager.restore_cell(project.resolve(), first, 0)
+                    updated = manager.get(project.resolve())
+
+                    self.assertEqual(restored_id, first.id)
+                    self.assertIsNotNone(updated)
+                    assert updated is not None
+                    self.assertEqual([cell.id for cell in updated.cells], [first.id, second.id])
+
+    def test_interrupt_kernel_uses_live_kernel_pid(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            project, _python = self._make_project(root, real_python=True)
+
+            with patch.dict("os.environ", {"XDG_STATE_HOME": str(root / "state")}):
+                with self._patched_context(project):
+                    manager = SessionManager()
+                    _session, token = manager.attach(project)
+
+                    interrupted = manager.interrupt_kernel(project.resolve())
+
+                    self.assertTrue(interrupted)
+
+                    manager.detach(project.resolve(), token)
+                    manager.kill(project.resolve())
+
+    def test_execute_cell_recovers_missing_connection_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            project, _python = self._make_project(root, real_python=True)
+
+            with patch.dict("os.environ", {"XDG_STATE_HOME": str(root / "state")}):
+                with self._patched_context(project):
+                    manager = SessionManager()
+                    session, token = manager.attach(project)
+                    cell_id = session.cells[0].id
+                    connection_file = session.connection_file
+                    assert connection_file is not None
+                    connection_file.unlink()
+
+                    manager.update_cell_source(project.resolve(), cell_id, "40 + 2")
+                    executed = manager.execute_cell(project.resolve(), cell_id)
+
+                    self.assertIsNotNone(executed)
+                    assert executed is not None
+                    self.assertIn("42", executed.output)
 
                     manager.detach(project.resolve(), token)
                     manager.kill(project.resolve())

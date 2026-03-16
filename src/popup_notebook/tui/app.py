@@ -288,9 +288,10 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
             new_cell = manager.insert_cell_before(context.project_root, self.model.current_cell_id)
             if new_cell is None:
                 return
+            self.model.reload()
             self.model.current_cell_id = new_cell.id
             self.edit_mode = False
-            await self._rebuild_notebook()
+            await self._insert_cell_widget(new_cell.id)
 
         async def action_insert_below(self) -> None:
             if self.edit_mode or self._pending_execution is not None:
@@ -298,9 +299,10 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
             new_cell = manager.insert_cell_after(context.project_root, self.model.current_cell_id)
             if new_cell is None:
                 return
+            self.model.reload()
             self.model.current_cell_id = new_cell.id
             self.edit_mode = False
-            await self._rebuild_notebook()
+            await self._insert_cell_widget(new_cell.id)
 
         async def action_cell_markdown(self) -> None:
             if (
@@ -458,9 +460,10 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
             if next_cell_id is None:
                 return
             self._deleted_cells.append(deleted_snapshot)
+            self.model.reload()
             self.model.current_cell_id = next_cell_id
             self.edit_mode = False
-            await self._rebuild_notebook()
+            await self._delete_cell_widget(cell_id)
 
         async def action_undo_delete(self) -> None:
             if self.edit_mode or not self._deleted_cells or self._pending_execution is not None:
@@ -475,9 +478,10 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
             if restored_cell_id is None:
                 self.notify("Unable to restore deleted cell.", severity="warning")
                 return
+            self.model.reload()
             self.model.current_cell_id = restored_cell_id
             self.edit_mode = False
-            await self._rebuild_notebook()
+            await self._insert_cell_widget(restored_cell_id)
 
         async def action_interrupt_kernel(self) -> None:
             if manager.interrupt_kernel(context.project_root):
@@ -677,24 +681,68 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
             self.model.reload()
             container = self.query_one("#notebook", VerticalScroll)
             await container.remove_children()
-            widgets = [
-                CellWidget(
-                    cell,
-                    current=(cell.id == self.model.current_cell_id),
-                    edit_mode=(cell.id == self.model.current_cell_id and self.edit_mode),
-                    show_line_numbers=(cell.id in self._line_number_cells),
-                    markdown_center=config.ui.markdown_center,
-                    output_max_lines=config.ui.output_max_lines,
-                    code_theme=config.ui.code_theme,
-                )
-                for cell in self.model.session.cells
-            ]
+            widgets = [self._make_cell_widget(cell) for cell in self.model.session.cells]
             widgets.append(Static("", id="notebook-tail-spacer"))
             await container.mount_all(widgets)
             self._update_status()
             self.call_after_refresh(self._update_tail_spacer)
             if refocus:
                 self.call_after_refresh(self._focus_current_cell)
+
+        def _make_cell_widget(self, cell: Cell) -> CellWidget:
+            return CellWidget(
+                cell,
+                current=(cell.id == self.model.current_cell_id),
+                edit_mode=(cell.id == self.model.current_cell_id and self.edit_mode),
+                show_line_numbers=(cell.id in self._line_number_cells),
+                markdown_center=config.ui.markdown_center,
+                output_max_lines=config.ui.output_max_lines,
+                code_theme=config.ui.code_theme,
+            )
+
+        def _cell_widgets(self) -> dict[str, CellWidget]:
+            return {widget.cell.id: widget for widget in self.query(CellWidget)}
+
+        async def _insert_cell_widget(self, cell_id: str) -> None:
+            container = self.query_one("#notebook", VerticalScroll)
+            widgets = self._cell_widgets()
+            if cell_id in widgets:
+                self._apply_widget_state()
+                return
+            cell = next((item for item in self.model.session.cells if item.id == cell_id), None)
+            if cell is None:
+                await self._rebuild_notebook()
+                return
+
+            insert_index = next(
+                (index for index, item in enumerate(self.model.session.cells) if item.id == cell_id),
+                None,
+            )
+            if insert_index is None:
+                await self._rebuild_notebook()
+                return
+
+            mounted_cells = [
+                widget for widget in container.children if isinstance(widget, CellWidget)
+            ]
+            before = (
+                mounted_cells[insert_index]
+                if insert_index < len(mounted_cells)
+                else self.query_one("#notebook-tail-spacer", Static)
+            )
+            await container.mount(self._make_cell_widget(cell), before=before)
+            self._apply_widget_state()
+            self.call_after_refresh(self._update_tail_spacer)
+
+        async def _delete_cell_widget(self, cell_id: str) -> None:
+            widgets = self._cell_widgets()
+            widget = widgets.get(cell_id)
+            if widget is None:
+                await self._rebuild_notebook()
+                return
+            await widget.remove()
+            self._apply_widget_state()
+            self.call_after_refresh(self._update_tail_spacer)
 
         async def _sync_widgets(self, *, refocus: bool = True) -> None:
             self.model.reload()
@@ -740,11 +788,20 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
                 widget = self.query_one(f"#cell-{cell_id}", CellWidget)
             except Exception:
                 return
-            container.scroll_to_widget(widget, animate=False, immediate=True, top=False)
+            if not self._widget_visible_in_viewport(container, widget):
+                container.scroll_to_widget(widget, animate=False, immediate=True, top=False)
             if self.edit_mode:
                 widget.focus_editor(cursor_location=self._cursor_locations.get(cell_id))
             else:
                 widget.focus_cell()
+
+        @staticmethod
+        def _widget_visible_in_viewport(container: VerticalScroll, widget: CellWidget) -> bool:
+            viewport = container.scroll_y
+            viewport_bottom = viewport + container.content_region.height
+            widget_top = widget.virtual_region.y
+            widget_bottom = widget_top + widget.virtual_region.height
+            return widget_top >= viewport and widget_bottom <= viewport_bottom
 
         def on_resize(self, _event) -> None:
             self.call_after_refresh(self._update_tail_spacer)

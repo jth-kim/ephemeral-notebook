@@ -4,6 +4,7 @@ import asyncio
 import unittest
 
 from textual.widgets._text_area import Selection
+from textual import events
 
 from popup_notebook.tui.widgets.cell import NotebookTextArea
 
@@ -28,6 +29,13 @@ class NotebookTextAreaTests(unittest.TestCase):
         self.assertTrue(skipped)
         self.assertEqual(area.text, "()")
         self.assertEqual(area.cursor_location, (0, 2))
+
+    def test_pair_character_alias_maps_square_and_curly_brackets(self) -> None:
+        left_square = events.Key("left_square_bracket", None)
+        left_curly = events.Key("left_curly_bracket", None)
+
+        self.assertEqual(NotebookTextArea._pair_character_from_event(left_square), "[")
+        self.assertEqual(NotebookTextArea._pair_character_from_event(left_curly), "{")
 
     def test_kernel_completion_falls_back_for_plain_words(self) -> None:
         area = NotebookTextArea("cell-1", text="ret", language="python", tab_behavior="indent")

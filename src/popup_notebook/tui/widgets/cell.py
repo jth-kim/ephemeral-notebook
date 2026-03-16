@@ -46,6 +46,18 @@ class NotebookTextArea(TextArea):
     _PYTHON_WORD = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
     _PAIR_OPENERS = {"(": ")", "[": "]", "{": "}", "\"": "\"", "'": "'"}
     _PAIR_CLOSERS = {")", "]", "}", "\"", "'"}
+    _PAIR_KEY_ALIASES = {
+        "[": "[",
+        "]": "]",
+        "{": "{",
+        "}": "}",
+        "left_square_bracket": "[",
+        "right_square_bracket": "]",
+        "left_curly_bracket": "{",
+        "right_curly_bracket": "}",
+        "left_brace": "{",
+        "right_brace": "}",
+    }
 
     def __init__(self, cell_id: str, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -85,8 +97,9 @@ class NotebookTextArea(TextArea):
                 event.prevent_default()
                 return
 
-        if self.language == "python" and event.character:
-            if self._handle_python_pairing(event.character):
+        pair_character = self._pair_character_from_event(event)
+        if self.language == "python" and pair_character:
+            if self._handle_python_pairing(pair_character):
                 event.stop()
                 event.prevent_default()
                 return
@@ -150,6 +163,16 @@ class NotebookTextArea(TextArea):
             return True
 
         return False
+
+    @classmethod
+    def _pair_character_from_event(cls, event: events.Key) -> str | None:
+        if event.character in cls._PAIR_OPENERS or event.character in cls._PAIR_CLOSERS:
+            return event.character
+        for alias in getattr(event, "aliases", []):
+            mapped = cls._PAIR_KEY_ALIASES.get(alias)
+            if mapped is not None:
+                return mapped
+        return cls._PAIR_KEY_ALIASES.get(event.key)
 
     def _insert_pythonic_newline(self) -> bool:
         start, end = self.selection

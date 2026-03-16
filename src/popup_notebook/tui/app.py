@@ -239,12 +239,6 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
 
         async def on_mount(self) -> None:
             await self._rebuild_notebook()
-            self.run_worker(
-                self._warm_kernel_client(),
-                name="warm-kernel",
-                group="kernel",
-                exit_on_error=False,
-            )
 
         async def on_key(self, event) -> None:
             if self.edit_mode:

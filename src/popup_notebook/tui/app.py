@@ -3,14 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 import os
 from pathlib import Path
-from rich.style import Style
-from rich.text import Text
 import shutil
 import subprocess
 import sys
 import time
 from typing import Iterable
-from textual._text_area_theme import TextAreaTheme
 
 from popup_notebook.config import load_app_config
 from popup_notebook.project import build_project_context
@@ -53,7 +50,6 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
     try:
         from textual.app import App, ComposeResult
         from textual.app import SystemCommand
-        from textual.command import DiscoveryHit, Hit, Provider
         from textual.binding import Binding
         from textual.containers import VerticalScroll
         from textual.screen import Screen
@@ -72,58 +68,7 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
     except SessionAttachedError as exc:
         raise RuntimeError(str(exc)) from exc
 
-    class ThemeCommandsProvider(Provider):
-        _THEMES = ("monokai", "dracula", "github_light", "vscode_dark", "css")
-
-        async def discover(self):
-            for name in self._THEMES:
-                yield self._theme_hit(name)
-
-        async def search(self, query: str):
-            matcher = self.matcher(query)
-            for name in self._THEMES:
-                label = f"editor theme {name.replace('_', ' ')}"
-                score = matcher.match(label)
-                if score <= 0:
-                    continue
-                yield self._theme_hit(name, score=score, text=label)
-
-        def _theme_hit(
-            self,
-            theme_name: str,
-            *,
-            score: float | None = None,
-            text: str | None = None,
-        ):
-            display = _build_theme_palette_display(
-                theme_name,
-                current_theme=getattr(self.app, "current_code_theme", config.ui.code_theme),
-                text_style=Style(color="#e0e0e0"),
-            )
-            help_text = (
-                f"Apply the {theme_name.replace('_', ' ')} editor theme for this popup session."
-            )
-            callback = lambda name=theme_name: getattr(
-                self.app,
-                "set_code_theme_from_palette",
-            )(name)
-            if score is None:
-                return DiscoveryHit(
-                    display,
-                    callback,
-                    text=text or f"editor theme {theme_name}",
-                    help=help_text,
-                )
-            return Hit(
-                score,
-                display,
-                callback,
-                text=text or f"editor theme {theme_name}",
-                help=help_text,
-            )
-
     class PopupNotebookApp(App[None]):
-        COMMANDS = App.COMMANDS | {ThemeCommandsProvider}
         CSS = """
         Screen {
             background: $surface;
@@ -265,7 +210,6 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
             self._nav_handoff_until = 0.0
             self._line_number_cells: set[str] = set()
             self._cursor_locations: dict[str, tuple[int, int]] = {}
-            self._code_theme = config.ui.code_theme
 
         def compose(self) -> ComposeResult:
             yield self._status
@@ -747,7 +691,7 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
                     show_line_numbers=(cell.id in self._line_number_cells),
                     markdown_center=config.ui.markdown_center,
                     output_max_lines=config.ui.output_max_lines,
-                    code_theme=self._code_theme,
+                    code_theme=config.ui.code_theme,
                 )
                 for cell in self.model.session.cells
             ]
@@ -1126,26 +1070,6 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
                 exit_on_error=False,
             )
 
-        @property
-        def current_code_theme(self) -> str:
-            return self._code_theme
-
-        def set_code_theme_from_palette(self, theme_name: str) -> None:
-            self.run_worker(
-                self._apply_code_theme(theme_name),
-                name=f"theme-{theme_name}",
-                group="palette",
-                exit_on_error=False,
-            )
-
-        async def _apply_code_theme(self, theme_name: str) -> None:
-            if theme_name == self._code_theme:
-                self.notify(f"{theme_name} is already active.")
-                return
-            self._code_theme = theme_name
-            await self._rebuild_notebook()
-            self.notify(f"Editor theme: {theme_name}")
-
         def _resize_popup(self, preset_name: str) -> None:
             preset = _POPUP_PRESETS.get(preset_name)
             if preset is None:
@@ -1278,40 +1202,3 @@ def _resize_tmux_popup(width_ratio: float, height_ratio: float) -> bool:
     except (OSError, ValueError, subprocess.CalledProcessError):
         return False
     return True
-
-
-def _build_theme_palette_display(
-    theme_name: str,
-    *,
-    current_theme: str,
-    text_style,
-):
-    theme = TextAreaTheme.get_builtin_theme(theme_name)
-    base_style = getattr(theme, "base_style", None)
-    selection_style = getattr(theme, "selection_style", None)
-    syntax_styles = getattr(theme, "syntax_styles", {}) or {}
-
-    base_bg = getattr(base_style, "bgcolor", None)
-    base_fg = getattr(base_style, "color", None)
-    selection_bg = getattr(selection_style, "bgcolor", None)
-    keyword_style = syntax_styles.get("keyword")
-    string_style = syntax_styles.get("string")
-
-    display = Text()
-    label = theme_name.replace("_", " ")
-    if theme_name == current_theme:
-        display.append("Current ", style="bold #d68c4f")
-    display.append("Theme: ", style=text_style)
-    display.append(label, style="bold #f5f5f0")
-    display.append("  ", style=text_style)
-    display.append("  ", style=Style(bgcolor=base_bg, color=base_fg))
-    display.append(" ", style=text_style)
-    if selection_bg is not None:
-        display.append("  ", style=Style(bgcolor=selection_bg))
-        display.append(" ", style=text_style)
-    if keyword_style is not None:
-        display.append("kw", style=keyword_style)
-        display.append(" ", style=text_style)
-    if string_style is not None:
-        display.append("\"s\"", style=string_style)
-    return display

@@ -44,6 +44,8 @@ class NotebookTextArea(TextArea):
 
     _PYTHON_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*$")
     _PYTHON_WORD = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+    _PAIR_OPENERS = {"(": ")", "[": "]", "{": "}", "\"": "\"", "'": "'"}
+    _PAIR_CLOSERS = {")", "]", "}", "\"", "'"}
 
     def __init__(self, cell_id: str, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -83,6 +85,12 @@ class NotebookTextArea(TextArea):
                 event.prevent_default()
                 return
 
+        if self.language == "python" and event.character:
+            if self._handle_python_pairing(event.character):
+                event.stop()
+                event.prevent_default()
+                return
+
         if event.key == "tab" and self.language == "python":
             if await self._autocomplete_python_token():
                 event.stop()
@@ -112,6 +120,36 @@ class NotebookTextArea(TextArea):
                 return
 
         await super()._on_key(event)
+
+    def _handle_python_pairing(self, character: str) -> bool:
+        start, end = self.selection
+        row, column = self.cursor_location
+        line = self.document.get_line(row)
+        next_character = line[column] if column < len(line) else ""
+
+        if character in self._PAIR_OPENERS:
+            closing = self._PAIR_OPENERS[character]
+            if start != end:
+                selected_text = self.selected_text
+                self.replace(
+                    f"{character}{selected_text}{closing}",
+                    start,
+                    end,
+                    maintain_selection_offset=False,
+                )
+                self.selection = Selection((start[0], start[1] + 1), (end[0], end[1] + 1))
+                return True
+            if next_character and not next_character.isspace():
+                return False
+            self.insert(f"{character}{closing}", maintain_selection_offset=False)
+            self.move_cursor((row, column + 1))
+            return True
+
+        if character in self._PAIR_CLOSERS and start == end and next_character == character:
+            self.move_cursor((row, column + 1))
+            return True
+
+        return False
 
     def _insert_pythonic_newline(self) -> bool:
         start, end = self.selection
@@ -188,7 +226,11 @@ class NotebookTextArea(TextArea):
         return True
 
     async def _kernel_completion(self):
-        request_completion = getattr(self.app, "request_completion", None)
+        try:
+            app = self.app
+        except Exception:
+            return None
+        request_completion = getattr(app, "request_completion", None)
         if not callable(request_completion):
             return None
         return await request_completion(

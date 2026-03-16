@@ -11,8 +11,8 @@ APP_NAME = "popup-notebook"
 
 @dataclass(frozen=True)
 class PopupConfig:
-    width: str = "88%"
-    height: str = "88%"
+    width: str = "92%"
+    height: str = "92%"
     x: str = "C"
     y: str = "C"
 

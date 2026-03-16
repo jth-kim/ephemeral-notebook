@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import builtins
+import keyword
+import re
 import textwrap
 
 from rich.text import Text
@@ -9,6 +12,7 @@ from textual._text_area_theme import TextAreaTheme
 from textual.containers import VerticalGroup
 from textual.message import Message
 from textual.reactive import reactive
+from textual.widgets._text_area import Selection
 from textual.widgets import Markdown, Static, TextArea
 
 from popup_notebook.sessions.models import Cell
@@ -38,21 +42,31 @@ class NotebookTextArea(TextArea):
             self.direction = direction
             super().__init__()
 
+    _PYTHON_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*$")
+    _PYTHON_WORD = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
     def __init__(self, cell_id: str, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.cell_id = cell_id
 
     async def _on_key(self, event: events.Key) -> None:
+        consume_nav_handoff = getattr(self.app, "consume_nav_handoff", None)
+        if callable(consume_nav_handoff):
+            consumed = await consume_nav_handoff(self.cell_id, event.key)
+            if consumed:
+                event.stop()
+                event.prevent_default()
+                return
+
         if event.key == "escape":
             event.stop()
             event.prevent_default()
+            begin_nav_handoff = getattr(self.app, "begin_nav_handoff", None)
+            if callable(begin_nav_handoff):
+                begin_nav_handoff(self.cell_id)
+            if self.parent is not None:
+                self.parent.focus()
             self.post_message(self.ExitEdit(self.cell_id))
-            return
-
-        if event.key == "super+a":
-            event.stop()
-            event.prevent_default()
-            self.action_select_all()
             return
 
         if event.key in {"ctrl+v", "super+v"}:
@@ -61,6 +75,18 @@ class NotebookTextArea(TextArea):
                 event.stop()
                 event.prevent_default()
                 self.action_paste()
+                return
+
+        if event.key == "enter":
+            if self._insert_pythonic_newline():
+                event.stop()
+                event.prevent_default()
+                return
+
+        if event.key == "tab" and self.language == "python":
+            if self._autocomplete_python_token():
+                event.stop()
+                event.prevent_default()
                 return
 
         if event.key in RUN_CELL_KEYS:
@@ -87,6 +113,104 @@ class NotebookTextArea(TextArea):
 
         await super()._on_key(event)
 
+    def _insert_pythonic_newline(self) -> bool:
+        start, end = self.selection
+        if start != end:
+            return False
+
+        row, column = self.cursor_location
+        line = self.document.get_line(row)
+        before_cursor = line[:column]
+        if self.language == "python":
+            base_indent = self._leading_whitespace(before_cursor)
+            stripped = before_cursor.rstrip()
+            extra_indent = ""
+            if stripped.endswith((":",
+                                  "(",
+                                  "[",
+                                  "{",
+                                  "\\")):
+                extra_indent = self._indent_unit()
+            self.insert(f"\n{base_indent}{extra_indent}", maintain_selection_offset=False)
+            return True
+
+        self.insert(f"\n{self._leading_whitespace(before_cursor)}", maintain_selection_offset=False)
+        return True
+
+    def _autocomplete_python_token(self) -> bool:
+        start, end = self.selection
+        if start != end:
+            return False
+
+        row, column = self.cursor_location
+        line = self.document.get_line(row)
+        before_cursor = line[:column]
+        match = self._PYTHON_IDENTIFIER.search(before_cursor)
+        if match is None:
+            return False
+        if match.start() > 0 and before_cursor[match.start() - 1] == ".":
+            return False
+
+        prefix = match.group(0)
+        candidates = sorted(
+            {
+                candidate
+                for candidate in self._python_completion_candidates()
+                if candidate.startswith(prefix) and candidate != prefix
+            }
+        )
+        if not candidates:
+            return False
+
+        if len(candidates) == 1:
+            completion = candidates[0]
+        else:
+            completion = self._common_prefix(candidates)
+            if completion == prefix:
+                return False
+
+        self.insert(completion[len(prefix) :], maintain_selection_offset=False)
+        return True
+
+    def _python_completion_candidates(self) -> set[str]:
+        document_words = set(self._PYTHON_WORD.findall(self.text))
+        builtin_names = {name for name in dir(builtins) if not name.startswith("_")}
+        keyword_names = set(keyword.kwlist)
+        common_names = {
+            "np",
+            "pd",
+            "plt",
+            "math",
+            "Path",
+            "Series",
+            "DataFrame",
+            "self",
+            "cls",
+        }
+        return document_words | builtin_names | keyword_names | common_names
+
+    @staticmethod
+    def _common_prefix(candidates: list[str]) -> str:
+        prefix = candidates[0]
+        for candidate in candidates[1:]:
+            limit = min(len(prefix), len(candidate))
+            index = 0
+            while index < limit and prefix[index] == candidate[index]:
+                index += 1
+            prefix = prefix[:index]
+            if not prefix:
+                break
+        return prefix
+
+    def _indent_unit(self) -> str:
+        if self.indent_type == "tabs":
+            return "\t"
+        return " " * self.indent_width
+
+    @staticmethod
+    def _leading_whitespace(text: str) -> str:
+        return text[: len(text) - len(text.lstrip(" \t"))]
+
 
 class CellWidget(VerticalGroup):
     """Notebook cell widget with inline editing and output display."""
@@ -111,6 +235,12 @@ class CellWidget(VerticalGroup):
             self.source = source
             super().__init__()
 
+    class CursorMoved(Message):
+        def __init__(self, cell_id: str, location: tuple[int, int]) -> None:
+            self.cell_id = cell_id
+            self.location = location
+            super().__init__()
+
     cell_kind = reactive("python")
     is_current = reactive(False)
     in_edit_mode = reactive(False)
@@ -122,6 +252,7 @@ class CellWidget(VerticalGroup):
         *,
         current: bool = False,
         edit_mode: bool = False,
+        show_line_numbers: bool = False,
         markdown_center: bool = False,
         output_max_lines: int = 12,
         code_theme: str = "monokai",
@@ -132,7 +263,7 @@ class CellWidget(VerticalGroup):
             cell.id,
             text=cell.source,
             language=cell.kind if cell.kind in {"python", "markdown"} else None,
-            show_line_numbers=False,
+            show_line_numbers=show_line_numbers,
             soft_wrap=True,
             id=f"editor-{cell.id}",
             tab_behavior="indent",
@@ -198,6 +329,11 @@ class CellWidget(VerticalGroup):
         self.post_message(self.SourceChanged(self.cell.id, self._editor.text))
         self.call_after_refresh(self._update_editor_height)
 
+    def on_text_area_selection_changed(self, event: TextArea.SelectionChanged) -> None:
+        if event.text_area is not self._editor:
+            return
+        self.post_message(self.CursorMoved(self.cell.id, event.selection.end))
+
     def on_text_area_focus(self, _event) -> None:
         self.post_message(self.Focused(self.cell.id, edit_mode=True))
 
@@ -212,7 +348,9 @@ class CellWidget(VerticalGroup):
             return
         self.focus()
 
-    def focus_editor(self) -> None:
+    def focus_editor(self, *, cursor_location: tuple[int, int] | None = None) -> None:
+        if cursor_location is not None:
+            self._editor.selection = Selection.cursor(cursor_location)
         self._editor.focus()
 
     def focus_cell(self) -> None:
@@ -226,6 +364,9 @@ class CellWidget(VerticalGroup):
 
     def set_running(self, is_running: bool) -> None:
         self.is_running = is_running
+
+    def set_show_line_numbers(self, show_line_numbers: bool) -> None:
+        self._editor.show_line_numbers = show_line_numbers
 
     def sync_from_cell(self, cell: Cell) -> None:
         self.cell = cell

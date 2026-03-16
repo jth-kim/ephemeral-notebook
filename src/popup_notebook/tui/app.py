@@ -6,6 +6,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import time
 from typing import Iterable
 
 from popup_notebook.config import load_app_config
@@ -37,6 +38,12 @@ class PendingExecution:
     move_to_next: bool
 
 
+_POPUP_PRESETS = {
+    "focused": (0.72, 0.94),
+    "expanded": (0.96, 0.96),
+}
+
+
 def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
     """Run the Textual app if available."""
     key_debug = key_debug or os.environ.get("POPUP_NOTEBOOK_KEY_DEBUG") == "1"
@@ -46,7 +53,7 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
         from textual.binding import Binding
         from textual.containers import VerticalScroll
         from textual.screen import Screen
-        from textual.widgets import Footer
+        from textual.widgets import Footer, Static
         from textual.worker import Worker, WorkerState
     except ImportError as exc:
         raise RuntimeError(
@@ -87,6 +94,11 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
             scrollbar-color: rgb(95, 109, 124);
             scrollbar-color-hover: rgb(119, 137, 154);
             scrollbar-color-active: rgb(214, 140, 79);
+        }
+
+        #notebook-tail-spacer {
+            height: 1;
+            background: transparent;
         }
 
         .cell {
@@ -171,7 +183,7 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
             Binding("m", "cell_markdown", "Markdown"),
             Binding("y", "cell_python", "Python"),
             Binding("o", "toggle_output", show=False),
-            Binding("c", "copy_cell_source", show=False),
+            Binding("l", "toggle_line_numbers", show=False),
             Binding("z", "undo_delete", show=False),
             Binding("up", "select_up", show=False),
             Binding("down", "select_down", show=False),
@@ -189,12 +201,15 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
             self.model = NotebookViewModel(manager, context.project_root, session)
             self._status = StatusBarWidget(id="status")
             self._live_kernel = LiveKernelClient()
-            self.edit_mode = True
+            self.edit_mode = False
             self._pending_nav_sequence = ""
             self._pending_nav_timer = None
             self._deleted_cells: list[DeletedCellSnapshot] = []
             self._pending_execution: PendingExecution | None = None
             self._execution_worker = None
+            self._nav_handoff_until = 0.0
+            self._line_number_cells: set[str] = set()
+            self._cursor_locations: dict[str, tuple[int, int]] = {}
 
         def compose(self) -> ComposeResult:
             yield self._status
@@ -212,10 +227,12 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
                 "toggle_output",
                 "clear_output",
                 "copy_cell_source",
+                "copy_cell_output",
                 "undo_delete",
                 "enter_edit",
                 "select_up",
                 "select_down",
+                "toggle_line_numbers",
             }:
                 return not self.edit_mode
             return super().check_action(action, parameters)
@@ -247,6 +264,8 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
             if self._pending_nav_sequence == "r" and event.key in {"a", "b", "r"}:
                 normalized_key = event.key
             elif self._pending_nav_sequence == "x" and event.key == "x":
+                normalized_key = event.key
+            elif self._pending_nav_sequence == "c" and event.key in {"c", "o"}:
                 normalized_key = event.key
             else:
                 normalized_key = self._normalize_nav_key(event.key)
@@ -341,6 +360,41 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
                 return
             self.copy_to_clipboard(cell.source)
             self.notify("Copied current cell to clipboard.")
+
+        def action_copy_cell_output(self) -> None:
+            if self.edit_mode or self.model.current_cell_id is None:
+                return
+            self.model.reload()
+            cell = next(
+                (cell for cell in self.model.session.cells if cell.id == self.model.current_cell_id),
+                None,
+            )
+            if cell is None or not cell.output.strip():
+                self.notify("Current cell has no output to copy.", severity="warning")
+                return
+            self.copy_to_clipboard(cell.output)
+            self.notify("Copied current output to clipboard.")
+
+        async def action_toggle_line_numbers(self) -> None:
+            if (
+                self.edit_mode
+                or self.model.current_cell_id is None
+                or self._pending_execution is not None
+            ):
+                return
+            cell_id = self.model.current_cell_id
+            if cell_id in self._line_number_cells:
+                self._line_number_cells.remove(cell_id)
+                enabled = False
+            else:
+                self._line_number_cells.add(cell_id)
+                enabled = True
+            self._apply_widget_state(refocus=False)
+            self.notify(
+                "Line numbers enabled for current cell."
+                if enabled
+                else "Line numbers hidden for current cell."
+            )
 
         async def action_run_and_stay(self) -> None:
             await self._execute_current_cell(move_to_next=False)
@@ -473,6 +527,9 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
             self.model.current_cell_id = message.cell_id
             await self._move_selection(message.direction)
 
+        def on_cell_widget_cursor_moved(self, message: CellWidget.CursorMoved) -> None:
+            self._cursor_locations[message.cell_id] = message.location
+
         def on_cell_widget_source_changed(self, message: CellWidget.SourceChanged) -> None:
             manager.update_cell_source(context.project_root, message.cell_id, message.source)
 
@@ -526,6 +583,14 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
                 self._clear_nav_sequence()
                 await self.action_clear_output()
                 return
+            if sequence == "cc":
+                self._clear_nav_sequence()
+                self.action_copy_cell_source()
+                return
+            if sequence == "co":
+                self._clear_nav_sequence()
+                self.action_copy_cell_output()
+                return
 
             self._pending_nav_sequence = key
             self._update_status()
@@ -548,7 +613,7 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
         def _normalize_nav_key(key: str) -> str | None:
             if key == "kp_0":
                 return "0"
-            if key in {"d", "i", "0", "r", "x"}:
+            if key in {"d", "i", "0", "r", "x", "c"}:
                 return key
             return None
 
@@ -618,20 +683,22 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
             self.model.reload()
             container = self.query_one("#notebook", VerticalScroll)
             await container.remove_children()
-            await container.mount_all(
-                [
-                    CellWidget(
-                        cell,
-                        current=(cell.id == self.model.current_cell_id),
-                        edit_mode=(cell.id == self.model.current_cell_id and self.edit_mode),
-                        markdown_center=config.ui.markdown_center,
-                        output_max_lines=config.ui.output_max_lines,
-                        code_theme=config.ui.code_theme,
-                    )
-                    for cell in self.model.session.cells
-                ]
-            )
+            widgets = [
+                CellWidget(
+                    cell,
+                    current=(cell.id == self.model.current_cell_id),
+                    edit_mode=(cell.id == self.model.current_cell_id and self.edit_mode),
+                    show_line_numbers=(cell.id in self._line_number_cells),
+                    markdown_center=config.ui.markdown_center,
+                    output_max_lines=config.ui.output_max_lines,
+                    code_theme=config.ui.code_theme,
+                )
+                for cell in self.model.session.cells
+            ]
+            widgets.append(Static("", id="notebook-tail-spacer"))
+            await container.mount_all(widgets)
             self._update_status()
+            self.call_after_refresh(self._update_tail_spacer)
             if refocus:
                 self.call_after_refresh(self._focus_current_cell)
 
@@ -646,12 +713,14 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
                 widget = widgets[cell.id]
                 widget.set_current(cell.id == self.model.current_cell_id)
                 widget.set_edit_mode(cell.id == self.model.current_cell_id and self.edit_mode)
+                widget.set_show_line_numbers(cell.id in self._line_number_cells)
                 widget.set_running(
                     self._pending_execution is not None and cell.id == self._pending_execution.cell_id
                 )
                 widget.sync_from_cell(cell)
 
             self._update_status()
+            self.call_after_refresh(self._update_tail_spacer)
             if refocus:
                 self.call_after_refresh(self._focus_current_cell)
 
@@ -659,6 +728,7 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
             for widget in self.query(CellWidget):
                 widget.set_current(widget.cell.id == self.model.current_cell_id)
                 widget.set_edit_mode(widget.cell.id == self.model.current_cell_id and self.edit_mode)
+                widget.set_show_line_numbers(widget.cell.id in self._line_number_cells)
                 widget.set_running(
                     self._pending_execution is not None
                     and widget.cell.id == self._pending_execution.cell_id
@@ -678,16 +748,50 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
                 return
             container.scroll_to_widget(widget, animate=False, immediate=True, top=False)
             if self.edit_mode:
-                widget.focus_editor()
+                widget.focus_editor(cursor_location=self._cursor_locations.get(cell_id))
             else:
                 widget.focus_cell()
 
+        def on_resize(self, _event) -> None:
+            self.call_after_refresh(self._update_tail_spacer)
+
+        def _update_tail_spacer(self) -> None:
+            try:
+                container = self.query_one("#notebook", VerticalScroll)
+                spacer = self.query_one("#notebook-tail-spacer", Static)
+            except Exception:
+                return
+            spacer.styles.height = max(6, container.content_region.height // 2)
+
         async def _enter_edit_mode(self) -> None:
+            self._nav_handoff_until = 0.0
             self.edit_mode = True
             self._clear_nav_sequence()
             self._apply_widget_state()
 
+        def fast_exit_edit_mode(self, cell_id: str) -> None:
+            self.model.current_cell_id = cell_id
+            self.edit_mode = False
+            self._clear_nav_sequence()
+            self._apply_widget_state(refocus=False)
+
+        def begin_nav_handoff(self, cell_id: str) -> None:
+            self.fast_exit_edit_mode(cell_id)
+            self._nav_handoff_until = time.monotonic() + 0.75
+
+        async def consume_nav_handoff(self, cell_id: str, key: str) -> bool:
+            if time.monotonic() > self._nav_handoff_until:
+                return False
+            normalized_key = self._normalize_nav_key(key)
+            if normalized_key is None:
+                return False
+            self.model.current_cell_id = cell_id
+            self.edit_mode = False
+            await self._handle_nav_sequence(normalized_key)
+            return True
+
         async def _exit_edit_mode(self) -> None:
+            self._nav_handoff_until = 0.0
             self.edit_mode = False
             self._clear_nav_sequence()
             self._apply_widget_state()
@@ -872,6 +976,24 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
                 "Clear the selected cell output without deleting the cell source.",
                 lambda: self._queue_palette_action(self.action_clear_output, "clear-output"),
             )
+            yield SystemCommand(
+                "Toggle current cell line numbers",
+                "Show or hide line numbers for the selected cell.",
+                lambda: self._queue_palette_action(
+                    self.action_toggle_line_numbers,
+                    "toggle-line-numbers",
+                ),
+            )
+            yield SystemCommand(
+                "Resize popup: focused",
+                "Shrink the popup into a thinner tall layout for code-first work.",
+                lambda: self._resize_popup("focused"),
+            )
+            yield SystemCommand(
+                "Resize popup: expanded",
+                "Expand the popup closer to full-screen when you need more room.",
+                lambda: self._resize_popup("expanded"),
+            )
             yield from self._shortcut_commands()
 
         def _shortcut_commands(self) -> Iterable[SystemCommand]:
@@ -879,10 +1001,6 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
                 (
                     "Shortcut: Run and move",
                     "Ctrl+R in nav or edit mode, or R in nav mode. Executes the selected cell and moves down, creating a new cell if needed.",
-                ),
-                (
-                    "Shortcut: Select all",
-                    "Cmd+A in edit mode selects the full current cell when your terminal forwards it.",
                 ),
                 (
                     "Shortcut: Enter edit mode",
@@ -906,11 +1024,15 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
                 ),
                 (
                     "Shortcut: Copy current cell",
-                    "c copies the current cell source to the system clipboard in nav mode.",
+                    "cc copies the current cell source and co copies the current output in nav mode.",
                 ),
                 (
                     "Shortcut: Toggle output",
                     "o expands or collapses the current cell output in nav mode.",
+                ),
+                (
+                    "Shortcut: Toggle line numbers",
+                    "l shows or hides line numbers for the current cell in nav mode.",
                 ),
                 (
                     "Shortcut: Run ranges",
@@ -947,6 +1069,15 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
                 group="palette",
                 exit_on_error=False,
             )
+
+        def _resize_popup(self, preset_name: str) -> None:
+            preset = _POPUP_PRESETS.get(preset_name)
+            if preset is None:
+                return
+            if _resize_tmux_popup(*preset):
+                self.notify(f"Popup resized: {preset_name}.")
+            else:
+                self.notify("Unable to resize popup in this session.", severity="warning")
 
         def copy_to_clipboard(self, text: str) -> None:
             super().copy_to_clipboard(text)
@@ -1035,3 +1166,39 @@ def _read_from_system_clipboard() -> str | None:
             continue
         return completed.stdout
     return None
+
+
+def _resize_tmux_popup(width_ratio: float, height_ratio: float) -> bool:
+    tmux_pane = os.environ.get("TMUX_PANE")
+    if not os.environ.get("TMUX") or not tmux_pane:
+        return False
+    try:
+        dimensions = subprocess.run(
+            ["tmux", "display-message", "-p", "-t", tmux_pane, "#{client_width} #{client_height}"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        client_width_str, client_height_str = dimensions.split()
+        client_width = int(client_width_str)
+        client_height = int(client_height_str)
+        target_width = max(80, int(client_width * width_ratio))
+        target_height = max(24, int(client_height * height_ratio))
+        subprocess.run(
+            [
+                "tmux",
+                "resize-pane",
+                "-t",
+                tmux_pane,
+                "-x",
+                str(target_width),
+                "-y",
+                str(target_height),
+            ],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except (OSError, ValueError, subprocess.CalledProcessError):
+        return False
+    return True

@@ -72,6 +72,32 @@ class LiveKernelClientTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("42", first.output)
                 self.assertIn("42", second.output)
 
+    async def test_live_client_completes_against_kernel_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            project = root / "project"
+            project.mkdir()
+
+            with patch.dict("os.environ", {"XDG_STATE_HOME": str(root / "state")}):
+                controller = KernelController(project, REPO_PYTHON)
+                runtime = controller.start()
+                client = LiveKernelClient()
+                try:
+                    await client.ensure_connected(
+                        kernel_pid=runtime.pid,
+                        connection_file=runtime.connection_file,
+                    )
+                    await client.execute("alpha_series = [1, 2, 3]")
+                    completion = await client.complete("alpha_ser", len("alpha_ser"))
+                    dotted = await client.complete("alpha_series.app", len("alpha_series.app"))
+                finally:
+                    client.close()
+                    controller.shutdown(runtime.pid, runtime.connection_file)
+
+                self.assertIn("alpha_series", completion.matches)
+                self.assertGreaterEqual(completion.cursor_end, completion.cursor_start)
+                self.assertIn("append", dotted.matches)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -11,7 +11,7 @@ from typing import Iterable
 
 from popup_notebook.config import load_app_config
 from popup_notebook.project import build_project_context
-from popup_notebook.sessions.kernel import LiveKernelClient
+from popup_notebook.sessions.kernel import CompletionResult, LiveKernelClient
 from popup_notebook.sessions.manager import BatchExecutionResult, SessionAttachedError, SessionManager
 from popup_notebook.sessions.models import Cell
 from popup_notebook.tui.notebook import NotebookViewModel
@@ -856,6 +856,20 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
                 executed_cell_ids=tuple(executed_cell_ids),
                 failed_cell_id=failed_cell_id,
             )
+
+        async def request_completion(
+            self,
+            *,
+            code: str,
+            cursor_pos: int,
+        ) -> CompletionResult | None:
+            try:
+                prepared = await self._prepare_live_kernel()
+                if not prepared:
+                    return None
+                return await self._live_kernel.complete(code, cursor_pos)
+            except Exception:
+                return None
 
         async def on_worker_state_changed(self, message: Worker.StateChanged) -> None:
             if message.worker is not self._execution_worker:

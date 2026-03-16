@@ -84,7 +84,7 @@ class NotebookTextArea(TextArea):
                 return
 
         if event.key == "tab" and self.language == "python":
-            if self._autocomplete_python_token():
+            if await self._autocomplete_python_token():
                 event.stop()
                 event.prevent_default()
                 return
@@ -137,7 +137,7 @@ class NotebookTextArea(TextArea):
         self.insert(f"\n{self._leading_whitespace(before_cursor)}", maintain_selection_offset=False)
         return True
 
-    def _autocomplete_python_token(self) -> bool:
+    async def _autocomplete_python_token(self) -> bool:
         start, end = self.selection
         if start != end:
             return False
@@ -145,6 +145,21 @@ class NotebookTextArea(TextArea):
         row, column = self.cursor_location
         line = self.document.get_line(row)
         before_cursor = line[:column]
+        if not before_cursor.strip():
+            return False
+        if before_cursor.endswith((" ", "\t")):
+            return False
+
+        completion_result = await self._kernel_completion()
+        if completion_result is not None:
+            inserted = self._apply_kernel_completion(
+                completion_result.matches,
+                completion_result.cursor_start,
+                completion_result.cursor_end,
+            )
+            if inserted:
+                return True
+
         match = self._PYTHON_IDENTIFIER.search(before_cursor)
         if match is None:
             return False
@@ -170,6 +185,43 @@ class NotebookTextArea(TextArea):
                 return False
 
         self.insert(completion[len(prefix) :], maintain_selection_offset=False)
+        return True
+
+    async def _kernel_completion(self):
+        request_completion = getattr(self.app, "request_completion", None)
+        if not callable(request_completion):
+            return None
+        return await request_completion(
+            code=self.text,
+            cursor_pos=self._cursor_offset(),
+        )
+
+    def _apply_kernel_completion(
+        self,
+        matches: tuple[str, ...],
+        cursor_start: int,
+        cursor_end: int,
+    ) -> bool:
+        if not matches:
+            return False
+
+        prefix = self.text[cursor_start:cursor_end]
+        if len(matches) == 1:
+            replacement = matches[0]
+        else:
+            replacement = self._common_prefix(list(matches))
+            if replacement == prefix:
+                preview = ", ".join(matches[:6])
+                if len(matches) > 6:
+                    preview += ", ..."
+                self.app.notify(f"Completions: {preview}")
+                return False
+
+        if replacement == prefix:
+            return False
+        start = self._offset_to_location(cursor_start)
+        end = self._offset_to_location(cursor_end)
+        self.replace(replacement, start, end, maintain_selection_offset=False)
         return True
 
     def _python_completion_candidates(self) -> set[str]:
@@ -206,6 +258,30 @@ class NotebookTextArea(TextArea):
         if self.indent_type == "tabs":
             return "\t"
         return " " * self.indent_width
+
+    def _cursor_offset(self) -> int:
+        row, column = self.cursor_location
+        offset = 0
+        for line_index in range(row):
+            offset += len(self.document.get_line(line_index)) + 1
+        return offset + column
+
+    def _offset_to_location(self, offset: int) -> tuple[int, int]:
+        remaining = max(0, offset)
+        line_count = len(self.document.lines)
+        for row in range(line_count):
+            line = self.document.get_line(row)
+            if remaining <= len(line):
+                return (row, remaining)
+            remaining -= len(line)
+            if row < line_count - 1:
+                if remaining == 0:
+                    return (row + 1, 0)
+                remaining -= 1
+        if line_count == 0:
+            return (0, 0)
+        last_line = self.document.get_line(line_count - 1)
+        return (line_count - 1, len(last_line))
 
     @staticmethod
     def _leading_whitespace(text: str) -> str:

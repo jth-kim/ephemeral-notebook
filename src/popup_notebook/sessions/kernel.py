@@ -46,6 +46,13 @@ class ExecutionResult:
     success: bool
 
 
+@dataclass(frozen=True)
+class CompletionResult:
+    matches: tuple[str, ...]
+    cursor_start: int
+    cursor_end: int
+
+
 class LiveKernelClient:
     """Keep one async client connected for the lifetime of a popup session."""
 
@@ -115,6 +122,32 @@ class LiveKernelClient:
             return
         message = result.output or "Failed to initialize popup-notebook kernel helpers."
         raise KernelBootstrapError(message)
+
+    async def complete(self, code: str, cursor_pos: int) -> CompletionResult:
+        async with self._lock:
+            client = self._client
+            if client is None:
+                raise RuntimeError("Kernel client is not connected.")
+            try:
+                reply = await client.complete(
+                    code=code,
+                    cursor_pos=cursor_pos,
+                    reply=True,
+                    timeout=5,
+                )
+            except Exception:
+                self.close()
+                raise
+
+        content = reply.get("content", {})
+        matches = tuple(str(match) for match in content.get("matches", []) if isinstance(match, str))
+        cursor_start = int(content.get("cursor_start", cursor_pos))
+        cursor_end = int(content.get("cursor_end", cursor_pos))
+        return CompletionResult(
+            matches=matches,
+            cursor_start=cursor_start,
+            cursor_end=cursor_end,
+        )
 
     async def _execute_request(
         self,

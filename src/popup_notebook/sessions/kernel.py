@@ -281,44 +281,53 @@ class KernelController:
         return self.start()
 
     def start(self) -> KernelRuntime:
-        from jupyter_client import KernelManager
-        from jupyter_client.kernelspec import KernelSpec
+        from jupyter_client import BlockingKernelClient
 
         self.session_dir.mkdir(parents=True, exist_ok=True)
-        kernel_manager = KernelManager(kernel_name="python3", connection_file=str(self.connection_file))
-        kernel_manager._kernel_spec = KernelSpec(  # type: ignore[attr-defined]
-            argv=[
-                str(self.interpreter),
-                "-m",
-                "ipykernel_launcher",
-                "-f",
-                "{connection_file}",
-            ],
-            display_name="popup-notebook",
-            language="python",
-            env={},
-            resource_dir=str(self.session_dir),
-        )
+        process = None
         try:
-            kernel_manager.start_kernel(
+            process = subprocess.Popen(
+                [
+                    str(self.interpreter),
+                    "-m",
+                    "ipykernel_launcher",
+                    "-f",
+                    str(self.connection_file),
+                ],
                 cwd=str(self.project_root),
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 start_new_session=True,
             )
-            kernel_client = kernel_manager.client()
+            deadline = time.time() + STARTUP_TIMEOUT
+            while time.time() < deadline:
+                if process.poll() is not None:
+                    raise KernelLaunchError(
+                        "Failed to start project kernel. Ensure the resolved interpreter has "
+                        f"ipykernel installed: {self.interpreter}"
+                    )
+                if self.connection_file.exists():
+                    break
+                time.sleep(0.05)
+            if not self.connection_file.exists():
+                raise KernelLaunchError(
+                    "Timed out waiting for the project kernel connection file."
+                )
+
+            kernel_client = BlockingKernelClient(connection_file=str(self.connection_file))
             kernel_client.load_connection_file()
             kernel_client.start_channels()
             kernel_client.wait_for_ready(timeout=STARTUP_TIMEOUT)
             connection_info = self._normalize_connection_info(kernel_client.get_connection_info())
             self._write_connection_info(self.connection_file, connection_info)
-            pid = kernel_manager.provisioner.pid
-            assert pid is not None
+            pid = process.pid
+            process._child_created = False  # type: ignore[attr-defined]
         except Exception as exc:
             if "kernel_client" in locals():
                 kernel_client.stop_channels()
-            kernel_manager.shutdown_kernel(now=True)
+            if process is not None and process.poll() is None:
+                self._terminate_process(process.pid)
             raise KernelLaunchError(
                 "Failed to start project kernel. Ensure the resolved interpreter has ipykernel "
                 f"installed: {self.interpreter}"

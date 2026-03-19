@@ -339,7 +339,7 @@ class SessionManager:
                 return False
             current_cell.output = output
             current_cell.execution_count = execution_count
-            current_cell.expanded = False
+            current_cell.expanded = bool(output.strip())
             save_session_state(session)
             return True
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import signal
 import subprocess
 import time
@@ -18,6 +19,9 @@ from popup_notebook.sessions.store import session_connection_path, session_log_p
 STARTUP_TIMEOUT: Final[float] = 10.0
 EXECUTION_TIMEOUT: Final[float] = 60.0
 SHUTDOWN_TIMEOUT: Final[float] = 5.0
+ANSI_ESCAPE_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?:\x1b\[[0-?]*[ -/]*[@-~])|(?:\x1b\][^\x07\x1b]*(?:\x07|\x1b\\\\))"
+)
 
 
 class KernelLaunchError(RuntimeError):
@@ -184,21 +188,25 @@ class LiveKernelClient:
             content = message["content"]
 
             if msg_type == "stream":
-                text = str(content.get("text", "")).rstrip()
+                text = _clean_output_text(str(content.get("text", "")).rstrip())
                 if text:
                     outputs.append(text)
             elif msg_type in {"execute_result", "display_data"}:
-                rendered = KernelController._render_output_data(content.get("data", {}))
+                rendered = _clean_output_text(
+                    KernelController._render_output_data(content.get("data", {}))
+                )
                 if rendered:
                     outputs.append(rendered)
             elif msg_type == "error":
                 success = False
                 traceback = content.get("traceback", [])
                 if traceback:
-                    outputs.append("\n".join(str(line) for line in traceback))
+                    outputs.append(_clean_output_text("\n".join(str(line) for line in traceback)))
                 else:
                     outputs.append(
-                        f"{content.get('ename', 'Error')}: {content.get('evalue', '')}".rstrip()
+                        _clean_output_text(
+                            f"{content.get('ename', 'Error')}: {content.get('evalue', '')}".rstrip()
+                        )
                     )
             elif msg_type == "status" and content.get("execution_state") == "idle":
                 break
@@ -217,7 +225,9 @@ class LiveKernelClient:
             if content.get("status") == "error" and not outputs:
                 success = False
                 outputs.append(
-                    f"{content.get('ename', 'Error')}: {content.get('evalue', '')}".rstrip()
+                    _clean_output_text(
+                        f"{content.get('ename', 'Error')}: {content.get('evalue', '')}".rstrip()
+                    )
                 )
             elif content.get("status") == "error":
                 success = False
@@ -409,21 +419,23 @@ class KernelController:
                 content = message["content"]
 
                 if msg_type == "stream":
-                    text = str(content.get("text", "")).rstrip()
+                    text = _clean_output_text(str(content.get("text", "")).rstrip())
                     if text:
                         outputs.append(text)
                 elif msg_type in {"execute_result", "display_data"}:
-                    rendered = self._render_output_data(content.get("data", {}))
+                    rendered = _clean_output_text(self._render_output_data(content.get("data", {})))
                     if rendered:
                         outputs.append(rendered)
                 elif msg_type == "error":
                     success = False
                     traceback = content.get("traceback", [])
                     if traceback:
-                        outputs.append("\n".join(str(line) for line in traceback))
+                        outputs.append(_clean_output_text("\n".join(str(line) for line in traceback)))
                     else:
                         outputs.append(
-                            f"{content.get('ename', 'Error')}: {content.get('evalue', '')}".rstrip()
+                            _clean_output_text(
+                                f"{content.get('ename', 'Error')}: {content.get('evalue', '')}".rstrip()
+                            )
                         )
                 elif msg_type == "status" and content.get("execution_state") == "idle":
                     break
@@ -442,7 +454,9 @@ class KernelController:
                 if content.get("status") == "error" and not outputs:
                     success = False
                     outputs.append(
-                        f"{content.get('ename', 'Error')}: {content.get('evalue', '')}".rstrip()
+                        _clean_output_text(
+                            f"{content.get('ename', 'Error')}: {content.get('evalue', '')}".rstrip()
+                        )
                     )
                 elif content.get("status") == "error":
                     success = False
@@ -520,3 +534,7 @@ class KernelController:
     @staticmethod
     def _load_connection_info(connection_file: Path) -> dict[str, object]:
         return json.loads(connection_file.read_text(encoding="utf-8"))
+
+
+def _clean_output_text(text: str) -> str:
+    return ANSI_ESCAPE_RE.sub("", text).replace("\r", "")

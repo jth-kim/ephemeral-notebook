@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 import os
 from pathlib import Path
@@ -207,6 +208,8 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
             self._deleted_cells: list[DeletedCellSnapshot] = []
             self._pending_execution: PendingExecution | None = None
             self._execution_worker = None
+            self._kernel_action_worker = None
+            self._pending_kernel_action: str | None = None
             self._nav_handoff_until = 0.0
             self._line_number_cells: set[str] = set()
             self._cursor_locations: dict[str, tuple[int, int]] = {}
@@ -490,21 +493,32 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
                 self.notify("Unable to interrupt kernel.", severity="warning")
 
         async def action_restart_kernel(self) -> None:
-            if self._pending_execution is not None:
+            if self._pending_execution is not None or self._pending_kernel_action is not None:
                 self.notify("A cell is already running.", severity="warning")
                 return
-            if manager.reset(context.project_root):
-                self._live_kernel.close()
-                await self._sync_widgets()
-                self.run_worker(
-                    self._warm_kernel_client(),
-                    name="warm-kernel",
-                    group="kernel",
-                    exit_on_error=False,
-                )
-                self.notify("Kernel restarted.")
-            else:
-                self.notify("Unable to restart kernel.", severity="warning")
+            self._pending_kernel_action = "Restarting kernel"
+            self._update_status()
+            self._kernel_action_worker = self.run_worker(
+                asyncio.to_thread(manager.reset, context.project_root),
+                name="restart-kernel",
+                group="kernel-action",
+                exit_on_error=False,
+                exclusive=True,
+            )
+
+        async def action_hard_reset(self) -> None:
+            if self._pending_execution is not None or self._pending_kernel_action is not None:
+                self.notify("A cell is already running.", severity="warning")
+                return
+            self._pending_kernel_action = "Clearing notebook"
+            self._update_status()
+            self._kernel_action_worker = self.run_worker(
+                asyncio.to_thread(manager.hard_reset, context.project_root),
+                name="hard-reset",
+                group="kernel-action",
+                exit_on_error=False,
+                exclusive=True,
+            )
 
         async def on_cell_widget_focused(self, message: CellWidget.Focused) -> None:
             if (
@@ -564,6 +578,10 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
             if sequence == "00":
                 self._clear_nav_sequence()
                 await self.action_restart_kernel()
+                return
+            if sequence == "dx":
+                self._clear_nav_sequence()
+                await self.action_hard_reset()
                 return
             if sequence == "rr":
                 self._clear_nav_sequence()
@@ -923,6 +941,56 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
                 return None
 
         async def on_worker_state_changed(self, message: Worker.StateChanged) -> None:
+            if message.worker is self._kernel_action_worker:
+                if message.state not in {
+                    WorkerState.SUCCESS,
+                    WorkerState.ERROR,
+                    WorkerState.CANCELLED,
+                }:
+                    return
+                pending_kernel_action = self._pending_kernel_action
+                self._kernel_action_worker = None
+                self._pending_kernel_action = None
+
+                if message.state == WorkerState.ERROR:
+                    self._update_status()
+                    error = message.worker.error
+                    self.notify(
+                        str(error) or "Kernel action failed.",
+                        severity="error",
+                    )
+                    return
+
+                if message.state == WorkerState.CANCELLED:
+                    self._update_status()
+                    self.notify("Kernel action cancelled.", severity="warning")
+                    return
+
+                succeeded = bool(message.worker.result)
+                self._live_kernel.close()
+                if succeeded:
+                    await self._sync_widgets(refocus=False)
+                    self.run_worker(
+                        self._warm_kernel_client(),
+                        name="warm-kernel",
+                        group="kernel",
+                        exit_on_error=False,
+                    )
+                    if pending_kernel_action == "Clearing notebook":
+                        self.model.reload()
+                        self.model.current_cell_id = (
+                            self.model.session.cells[0].id if self.model.session.cells else None
+                        )
+                        self.edit_mode = False
+                        await self._rebuild_notebook()
+                        self.notify("Notebook cleared and kernel restarted.")
+                    else:
+                        self.notify("Kernel restarted.")
+                else:
+                    self._update_status()
+                    self.notify("Unable to complete kernel action.", severity="warning")
+                return
+
             if message.worker is not self._execution_worker:
                 return
             if message.state not in {
@@ -991,6 +1059,7 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
             location = context.project_root.name or str(context.project_root)
             interpreter = context.interpreter.name
             running = self._pending_execution.label if self._pending_execution is not None else None
+            kernel_action = self._pending_kernel_action
             if config.ui.status_verbosity == "full":
                 status_parts = [
                     f"Project {context.project_root}",
@@ -1013,6 +1082,7 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
                     status_parts
                     + [
                         *([running] if running else []),
+                        *([kernel_action] if kernel_action else []),
                         *(["KeyDebug: keys.log"] if key_debug else []),
                     ]
                     + ([pending] if pending else [])
@@ -1093,7 +1163,7 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
                 ),
                 (
                     "Shortcut: Toggle output",
-                    "o expands or collapses the current cell output in nav mode.",
+                    "o collapses or re-expands the current cell output in nav mode.",
                 ),
                 (
                     "Shortcut: Toggle line numbers",
@@ -1109,7 +1179,7 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
                 ),
                 (
                     "Shortcut: Kernel control",
-                    "ii interrupts the kernel and 00 restarts it in nav mode.",
+                    "ii interrupts the kernel, 00 restarts it, and dx clears the notebook and restarts the kernel in nav mode.",
                 ),
                 (
                     "Shortcut: Navigate cells",

@@ -562,7 +562,7 @@ class CellWidget(VerticalGroup):
         visible_text = (
             "\n".join(lines[: self._output_max_lines]) if truncated else content
         )
-        rendered = Text.from_ansi(visible_text)
+        rendered = Text(visible_text)
         if truncated:
             rendered.append("\n\n")
             rendered.append("... output truncated", style="bold #d68c4f")

@@ -6,7 +6,7 @@ import unittest
 from textual.widgets._text_area import Selection
 from textual import events
 
-from popup_notebook.tui.widgets.cell import NotebookTextArea
+from popup_notebook.tui.widgets.cell import NotebookTextArea, _pretty_repr_text
 
 
 class NotebookTextAreaTests(unittest.TestCase):
@@ -45,6 +45,25 @@ class NotebookTextAreaTests(unittest.TestCase):
 
         self.assertTrue(completed)
         self.assertEqual(area.text, "return")
+
+    def test_pretty_repr_text_formats_repr_like_outputs(self) -> None:
+        rendered = _pretty_repr_text(
+            "ProfileReport(summary=df, recommendation='keep', cache_path=PosixPath('x'))"
+        )
+
+        self.assertEqual(
+            rendered,
+            "ProfileReport(\n"
+            "  summary=df,\n"
+            "  recommendation='keep',\n"
+            "  cache_path=PosixPath('x')\n"
+            ")",
+        )
+
+    def test_pretty_repr_text_leaves_tracebacks_unchanged(self) -> None:
+        traceback = "Traceback (most recent call last)\nNameError: x"
+
+        self.assertEqual(_pretty_repr_text(traceback), traceback)
 
 
 if __name__ == "__main__":

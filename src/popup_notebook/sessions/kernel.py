@@ -20,7 +20,7 @@ STARTUP_TIMEOUT: Final[float] = 10.0
 EXECUTION_TIMEOUT: Final[float] = 60.0
 SHUTDOWN_TIMEOUT: Final[float] = 5.0
 ANSI_ESCAPE_RE: Final[re.Pattern[str]] = re.compile(
-    r"(?:\x1b\[[0-?]*[ -/]*[@-~])|(?:\x1b\][^\x07\x1b]*(?:\x07|\x1b\\\\))"
+    r"(?:\x1b\[(?![0-9;]*m)[0-?]*[ -/]*[@-~])|(?:\x1b\][^\x07\x1b]*(?:\x07|\x1b\\\\))"
 )
 
 

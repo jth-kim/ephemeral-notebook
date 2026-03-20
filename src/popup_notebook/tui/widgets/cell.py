@@ -20,6 +20,7 @@ from popup_notebook.sessions.models import Cell
 RUN_CELL_KEYS = ("ctrl+r",)
 SELECTION_BG = "#4b6a8a"
 SELECTION_FG = "#f8f8f2"
+_REPR_LIKE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\(")
 
 
 class NotebookTextArea(TextArea):
@@ -429,6 +430,8 @@ class CellWidget(VerticalGroup):
         self._refresh()
 
     def on_focus(self) -> None:
+        if self._editor.has_focus:
+            return
         self.post_message(self.Focused(self.cell.id, edit_mode=False))
 
     async def _on_key(self, event: events.Key) -> None:
@@ -483,6 +486,7 @@ class CellWidget(VerticalGroup):
 
     def on_mouse_down(self, event: events.MouseDown) -> None:
         if self._mouse_targets_editor(event.widget):
+            self._editor.focus()
             return
         if bool(getattr(self.app, "edit_mode", False)):
             self._editor.focus()
@@ -552,6 +556,7 @@ class CellWidget(VerticalGroup):
         content = self.cell.output.rstrip()
         if not content:
             return ""
+        content = _pretty_repr_text(content)
         lines = content.splitlines()
         truncated = not self.cell.expanded and len(lines) > self._output_max_lines
         visible_text = (
@@ -613,3 +618,95 @@ class CellWidget(VerticalGroup):
         )
         self._editor.register_theme(derived_theme)
         return derived_theme.name
+
+
+def _pretty_repr_text(text: str) -> str:
+    stripped = text.strip()
+    if not stripped or stripped.startswith("Traceback"):
+        return text
+    if not _REPR_LIKE_RE.match(stripped) or "=" not in stripped or not stripped.endswith(")"):
+        return text
+
+    head, sep, inner = stripped.partition("(")
+    if not sep:
+        return text
+    inner = inner[:-1]
+    parts = _split_top_level_fields(inner)
+    if len(parts) < 2:
+        return text
+
+    formatted_parts = []
+    for part in parts:
+        field = part.strip()
+        if not field:
+            continue
+        name, eq, value = field.partition("=")
+        if not eq:
+            return text
+        value = value.strip()
+        value_lines = value.splitlines() or [value]
+        formatted_parts.append(
+            f"  {name.strip()}={value_lines[0]}"
+            + "".join(f"\n{textwrap.indent(line, '    ')}" for line in value_lines[1:])
+        )
+    if not formatted_parts:
+        return text
+    return f"{head}(\n" + ",\n".join(formatted_parts) + "\n)"
+
+
+def _split_top_level_fields(text: str) -> list[str]:
+    fields: list[str] = []
+    current: list[str] = []
+    paren_depth = 0
+    bracket_depth = 0
+    brace_depth = 0
+    quote: str | None = None
+    escape = False
+
+    for character in text:
+        current.append(character)
+        if quote is not None:
+            if escape:
+                escape = False
+                continue
+            if character == "\\":
+                escape = True
+                continue
+            if character == quote:
+                quote = None
+            continue
+
+        if character in {"'", '"'}:
+            quote = character
+            continue
+        if character == "(":
+            paren_depth += 1
+            continue
+        if character == ")":
+            paren_depth = max(0, paren_depth - 1)
+            continue
+        if character == "[":
+            bracket_depth += 1
+            continue
+        if character == "]":
+            bracket_depth = max(0, bracket_depth - 1)
+            continue
+        if character == "{":
+            brace_depth += 1
+            continue
+        if character == "}":
+            brace_depth = max(0, brace_depth - 1)
+            continue
+        if (
+            character == ","
+            and paren_depth == 0
+            and bracket_depth == 0
+            and brace_depth == 0
+        ):
+            fields.append("".join(current[:-1]).strip())
+            current = []
+
+    tail = "".join(current).strip()
+    if tail:
+        fields.append(tail)
+    return fields

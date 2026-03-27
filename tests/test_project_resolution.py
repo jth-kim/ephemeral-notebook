@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from popup_notebook.project import (
+from ephemeral_notebook.project import (
     build_project_context,
     load_project_notebook_settings,
     resolve_interpreter,
@@ -63,7 +63,7 @@ class ProjectResolutionTests(unittest.TestCase):
             cwd = Path(tmp_dir)
             runtime = cwd / "runtime-python"
             runtime.write_text("", encoding="utf-8")
-            with patch("popup_notebook.project.sys.executable", str(runtime)):
+            with patch("ephemeral_notebook.project.sys.executable", str(runtime)):
                 interpreter, source = resolve_interpreter(cwd, cwd)
 
             self.assertEqual(interpreter, runtime)
@@ -73,8 +73,8 @@ class ProjectResolutionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             cwd = Path(tmp_dir)
             with (
-                patch("popup_notebook.project.sys.executable", ""),
-                patch("popup_notebook.project.which", return_value="/usr/bin/python3"),
+                patch("ephemeral_notebook.project.sys.executable", ""),
+                patch("ephemeral_notebook.project.which", return_value="/usr/bin/python3"),
             ):
                 interpreter, source = resolve_interpreter(cwd, cwd)
 
@@ -99,7 +99,7 @@ class ProjectResolutionTests(unittest.TestCase):
             project = Path(tmp_dir)
             (project / "pyproject.toml").write_text(
                 """
-[tool.popup-notebook]
+[tool.ephemeral-notebook]
 startup_imports = ["numpy as np", "pandas as pd"]
 startup = ["from math import sqrt"]
 startup_code = ["GREETING = 'hi'"]

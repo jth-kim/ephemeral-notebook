@@ -5,7 +5,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-APP_NAME = "popup-notebook"
+APP_NAME = "ephemeral-notebook"
 
 
 @dataclass(frozen=True)

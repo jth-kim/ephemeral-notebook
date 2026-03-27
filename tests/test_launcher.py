@@ -7,7 +7,7 @@ from pathlib import Path
 from subprocess import CompletedProcess
 from unittest.mock import call, patch
 
-from popup_notebook.launcher import PopupGeometry, configure_tmux_keyboard, tmux_popup_command
+from ephemeral_notebook.launcher import PopupGeometry, configure_tmux_keyboard, tmux_popup_command
 
 
 class LauncherTests(unittest.TestCase):
@@ -21,7 +21,7 @@ class LauncherTests(unittest.TestCase):
         shell_command = command[-1]
         self.assertTrue(shell_command.startswith("exec "))
         self.assertIn(sys.executable, shell_command)
-        self.assertIn("-m popup_notebook.cli ui", shell_command)
+        self.assertIn("-m ephemeral_notebook.cli ui", shell_command)
         self.assertIn(str(cwd), shell_command)
 
     def test_tmux_popup_command_forwards_pythonpath_when_present(self) -> None:
@@ -42,7 +42,7 @@ class LauncherTests(unittest.TestCase):
 
         shell_command = command[-1]
         self.assertIn("TEXTUAL_DEBUG=1", shell_command)
-        self.assertIn("POPUP_NOTEBOOK_KEY_DEBUG=1", shell_command)
+        self.assertIn("EPHEMERAL_NOTEBOOK_KEY_DEBUG=1", shell_command)
         self.assertIn("--key-debug", shell_command)
 
     def test_configure_tmux_keyboard_sets_extkeys_before_popup(self) -> None:
@@ -66,7 +66,7 @@ class LauncherTests(unittest.TestCase):
                 return responses[1]
             return CompletedProcess(args, 0, stdout="")
 
-        with patch("popup_notebook.launcher.subprocess.run", side_effect=fake_run) as run:
+        with patch("ephemeral_notebook.launcher.subprocess.run", side_effect=fake_run) as run:
             configure_tmux_keyboard()
 
         self.assertEqual(
@@ -107,7 +107,7 @@ class LauncherTests(unittest.TestCase):
                 return CompletedProcess(args, 0, stdout="xterm-256color:extkeys\n")
             return CompletedProcess(args, 0, stdout="")
 
-        with patch("popup_notebook.launcher.subprocess.run", side_effect=fake_run) as run:
+        with patch("ephemeral_notebook.launcher.subprocess.run", side_effect=fake_run) as run:
             configure_tmux_keyboard()
 
         self.assertNotIn(

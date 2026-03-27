@@ -1,4 +1,4 @@
-"""popup_notebook package."""
+"""ephemeral_notebook package."""
 
 __all__ = ["__version__"]
 

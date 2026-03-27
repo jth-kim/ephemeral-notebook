@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from popup_notebook.sessions.manager import SessionManager
-from popup_notebook.sessions.models import SessionState
+from ephemeral_notebook.sessions.manager import SessionManager
+from ephemeral_notebook.sessions.models import SessionState
 
 
 class NotebookViewModel:

@@ -65,8 +65,8 @@ def tmux_popup_command(
     if key_debug:
         if not python_path:
             command_parts.append("env")
-        command_parts.extend(["TEXTUAL_DEBUG=1", "POPUP_NOTEBOOK_KEY_DEBUG=1"])
-    command_parts.extend([sys.executable, "-m", "popup_notebook.cli", "ui", "--cwd", str(cwd)])
+        command_parts.extend(["TEXTUAL_DEBUG=1", "EPHEMERAL_NOTEBOOK_KEY_DEBUG=1"])
+    command_parts.extend([sys.executable, "-m", "ephemeral_notebook.cli", "ui", "--cwd", str(cwd)])
     if key_debug:
         command_parts.append("--key-debug")
     app_command = shlex.join(command_parts)

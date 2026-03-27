@@ -4,11 +4,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
 
-from popup_notebook.project import build_project_context, load_project_notebook_settings
-from popup_notebook.sessions.bootstrap import BOOTSTRAP_VERSION
-from popup_notebook.sessions.kernel import KernelController, KernelRuntime
-from popup_notebook.sessions.models import Cell, CellKind, SessionState
-from popup_notebook.sessions.store import (
+from ephemeral_notebook.project import build_project_context, load_project_notebook_settings
+from ephemeral_notebook.sessions.bootstrap import BOOTSTRAP_VERSION
+from ephemeral_notebook.sessions.kernel import KernelController, KernelRuntime
+from ephemeral_notebook.sessions.models import Cell, CellKind, SessionState
+from ephemeral_notebook.sessions.store import (
     delete_session_state,
     load_session_state,
     save_session_state,

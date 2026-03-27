@@ -7,9 +7,9 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
-from popup_notebook.project import ProjectContext
-from popup_notebook.sessions.manager import SessionAttachedError, SessionManager
-from popup_notebook.sessions.store import save_session_state
+from ephemeral_notebook.project import ProjectContext
+from ephemeral_notebook.sessions.manager import SessionAttachedError, SessionManager
+from ephemeral_notebook.sessions.store import save_session_state
 
 REPO_PYTHON = Path(__file__).resolve().parents[1] / ".venv" / "bin" / "python"
 
@@ -35,7 +35,7 @@ class SessionManagerTests(unittest.TestCase):
     @contextmanager
     def _patched_context(self, project: Path):
         with patch(
-            "popup_notebook.sessions.manager.build_project_context",
+            "ephemeral_notebook.sessions.manager.build_project_context",
             return_value=ProjectContext(
                 cwd=project.resolve(),
                 project_root=project.resolve(),
@@ -238,7 +238,7 @@ class SessionManagerTests(unittest.TestCase):
                     manager.update_cell_source(project.resolve(), cell_id, "1 + 1")
 
                     with patch(
-                        "popup_notebook.sessions.manager.KernelController.bootstrap"
+                        "ephemeral_notebook.sessions.manager.KernelController.bootstrap"
                     ) as bootstrap:
                         bootstrap.return_value = None
                         manager.execute_cell(project.resolve(), cell_id)

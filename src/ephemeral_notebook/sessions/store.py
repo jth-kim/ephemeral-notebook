@@ -6,8 +6,8 @@ from hashlib import sha1
 from pathlib import Path
 from typing import Iterator
 
-from popup_notebook.config import state_dir
-from popup_notebook.sessions.models import SessionState
+from ephemeral_notebook.config import state_dir
+from ephemeral_notebook.sessions.models import SessionState
 
 
 def session_store_dir(project_root: Path) -> Path:

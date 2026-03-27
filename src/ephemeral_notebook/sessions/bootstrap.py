@@ -22,9 +22,9 @@ def _pn_clip(value, max_width=24):
         text = ""
     else:
         text = str(value)
-    text = text.replace("\r", "").replace("\n", " ↩ ")
+    text = text.replace("\r", "").replace("\n", " \u21a9 ")
     if len(text) > max_width:
-        return text[: max_width - 1] + "…"
+        return text[: max_width - 1] + "\u2026"
     return text
 
 
@@ -46,26 +46,26 @@ def _pn_box_table(headers, rows, aligns, max_width=24):
         for index, value in enumerate(row):
             widths[index] = max(widths[index], len(value))
 
-    top = "┌" + "┬".join("─" * (width + 2) for width in widths) + "┐"
+    top = "\u250c" + "\u252c".join("\u2500" * (width + 2) for width in widths) + "\u2510"
     header = (
-        "│ "
-        + " │ ".join(
+        "\u2502 "
+        + " \u2502 ".join(
             _pn_align(value, widths[index], bool(aligns[index]))
             for index, value in enumerate(clipped_headers)
         )
-        + " │"
+        + " \u2502"
     )
-    divider = "├" + "┼".join("─" * (width + 2) for width in widths) + "┤"
+    divider = "\u251c" + "\u253c".join("\u2500" * (width + 2) for width in widths) + "\u2524"
     body = [
-        "│ "
-        + " │ ".join(
+        "\u2502 "
+        + " \u2502 ".join(
             _pn_align(value, widths[index], bool(aligns[index]))
             for index, value in enumerate(row)
         )
-        + " │"
+        + " \u2502"
         for row in clipped_rows
     ]
-    bottom = "└" + "┴".join("─" * (width + 2) for width in widths) + "┘"
+    bottom = "\u2514" + "\u2534".join("\u2500" * (width + 2) for width in widths) + "\u2518"
     return "\n".join([top, header, divider, *body, bottom])
 
 
@@ -77,18 +77,18 @@ def _pn_format_dataframe(df, max_rows=20, max_cols=8, max_width=24):
         row[0] = frame.index[display_index]
 
     if len(df.columns) > max_cols:
-        headers.append("…")
+        headers.append("\u2026")
         for row in rows:
-            row.append("…")
+            row.append("\u2026")
     if len(df.index) > max_rows:
-        rows.append(["…"] * len(headers))
+        rows.append(["\u2026"] * len(headers))
 
     aligns = []
     for column_index in range(len(headers)):
         values = [
             row[column_index]
             for row in rows
-            if column_index < len(row) and row[column_index] != "…"
+            if column_index < len(row) and row[column_index] != "\u2026"
         ]
         aligns.append(bool(values) and all(_pn_is_number(value) for value in values))
 
@@ -152,10 +152,10 @@ def build_bootstrap_code(startup_statements: tuple[str, ...]) -> str:
             f"for _pn_code in {startup_payload}:",
             "    exec(_pn_code, globals())",
             "",
-            f'globals()["_POPUP_NOTEBOOK_BOOTSTRAP_VERSION"] = {BOOTSTRAP_VERSION}',
+            f'globals()["_EPHEMERAL_NOTEBOOK_BOOTSTRAP_VERSION"] = {BOOTSTRAP_VERSION}',
         ]
     ).strip()
     return (
-        f"if globals().get('_POPUP_NOTEBOOK_BOOTSTRAP_VERSION') != {BOOTSTRAP_VERSION}:\n"
+        f"if globals().get('_EPHEMERAL_NOTEBOOK_BOOTSTRAP_VERSION') != {BOOTSTRAP_VERSION}:\n"
         + textwrap.indent(body, "    ")
     )

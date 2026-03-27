@@ -10,22 +10,22 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-from popup_notebook.config import load_app_config
-from popup_notebook.project import build_project_context
-from popup_notebook.sessions.kernel import CompletionResult, LiveKernelClient
-from popup_notebook.sessions.manager import (
+from ephemeral_notebook.config import load_app_config
+from ephemeral_notebook.project import build_project_context
+from ephemeral_notebook.sessions.kernel import CompletionResult, LiveKernelClient
+from ephemeral_notebook.sessions.manager import (
     BatchExecutionResult,
     SessionAttachedError,
     SessionManager,
 )
-from popup_notebook.sessions.models import Cell
-from popup_notebook.tui.notebook import NotebookViewModel
-from popup_notebook.tui.widgets.cell import (
+from ephemeral_notebook.sessions.models import Cell
+from ephemeral_notebook.tui.notebook import NotebookViewModel
+from ephemeral_notebook.tui.widgets.cell import (
     RUN_CELL_KEYS,
     CellWidget,
     NotebookTextArea,
 )
-from popup_notebook.tui.widgets.status_bar import StatusBarWidget
+from ephemeral_notebook.tui.widgets.status_bar import StatusBarWidget
 
 
 @dataclass(frozen=True)
@@ -51,7 +51,7 @@ _POPUP_PRESETS = {
 
 def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
     """Run the Textual app if available."""
-    key_debug = key_debug or os.environ.get("POPUP_NOTEBOOK_KEY_DEBUG") == "1"
+    key_debug = key_debug or os.environ.get("EPHEMERAL_NOTEBOOK_KEY_DEBUG") == "1"
     try:
         from textual.app import App, ComposeResult, SystemCommand
         from textual.binding import Binding
@@ -1225,7 +1225,7 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
                 (
                     "Config: Global config file",
                     "Global settings live in "
-                    "~/.config/popup-notebook/config.toml "
+                    "~/.config/ephemeral-notebook/config.toml "
                     "or XDG_CONFIG_HOME.",
                 ),
             ]

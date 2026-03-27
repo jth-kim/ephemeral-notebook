@@ -7,8 +7,8 @@ from unittest.mock import patch
 
 from typer.testing import CliRunner
 
-from popup_notebook.cli import app
-from popup_notebook.config import DEFAULT_CONFIG, load_app_config
+from ephemeral_notebook.cli import app
+from ephemeral_notebook.config import DEFAULT_CONFIG, load_app_config
 
 
 class ConfigTests(unittest.TestCase):
@@ -21,7 +21,7 @@ class ConfigTests(unittest.TestCase):
 
     def test_load_app_config_reads_popup_and_ui_sections(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
-            config_dir = Path(tmp_dir) / "popup-notebook"
+            config_dir = Path(tmp_dir) / "ephemeral-notebook"
             config_dir.mkdir(parents=True)
             (config_dir / "config.toml").write_text(
                 """
@@ -54,7 +54,7 @@ markdown_center = true
 
     def test_load_app_config_reads_output_and_theme_settings(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
-            config_dir = Path(tmp_dir) / "popup-notebook"
+            config_dir = Path(tmp_dir) / "ephemeral-notebook"
             config_dir.mkdir(parents=True)
             (config_dir / "config.toml").write_text(
                 """
@@ -75,7 +75,7 @@ code_theme = "vscode_dark"
         runner = CliRunner()
         with tempfile.TemporaryDirectory() as tmp_dir:
             cwd = Path(tmp_dir) / "project"
-            config_dir = Path(tmp_dir) / "config" / "popup-notebook"
+            config_dir = Path(tmp_dir) / "config" / "ephemeral-notebook"
             cwd.mkdir(parents=True)
             config_dir.mkdir(parents=True)
             (config_dir / "config.toml").write_text(
@@ -91,8 +91,8 @@ y = "3"
 
             with (
                 patch.dict("os.environ", {"XDG_CONFIG_HOME": str(Path(tmp_dir) / "config")}),
-                patch("popup_notebook.cli.in_tmux", return_value=True),
-                patch("popup_notebook.cli.launch_tmux_popup") as launch_tmux_popup,
+                patch("ephemeral_notebook.cli.in_tmux", return_value=True),
+                patch("ephemeral_notebook.cli.launch_tmux_popup") as launch_tmux_popup,
             ):
                 result = runner.invoke(app, ["open", "--cwd", str(cwd)])
 

@@ -12,8 +12,8 @@ from pathlib import Path
 from queue import Empty
 from typing import Final
 
-from popup_notebook.sessions.bootstrap import build_bootstrap_code
-from popup_notebook.sessions.store import (
+from ephemeral_notebook.sessions.bootstrap import build_bootstrap_code
+from ephemeral_notebook.sessions.store import (
     session_connection_path,
     session_log_path,
     session_store_dir,
@@ -36,7 +36,7 @@ class ExecutionTimeoutError(RuntimeError):
 
 
 class KernelBootstrapError(RuntimeError):
-    """Raised when popup-notebook bootstrap code cannot initialize the kernel session."""
+    """Raised when ephemeral-notebook bootstrap code cannot initialize the kernel session."""
 
 
 @dataclass(frozen=True)
@@ -127,7 +127,7 @@ class LiveKernelClient:
                 raise
         if result.success:
             return
-        message = result.output or "Failed to initialize popup-notebook kernel helpers."
+        message = result.output or "Failed to initialize ephemeral-notebook kernel helpers."
         raise KernelBootstrapError(message)
 
     async def complete(self, code: str, cursor_pos: int) -> CompletionResult:
@@ -393,7 +393,7 @@ class KernelController:
         )
         if result.success:
             return
-        message = result.output or "Failed to initialize popup-notebook kernel helpers."
+        message = result.output or "Failed to initialize ephemeral-notebook kernel helpers."
         raise KernelBootstrapError(message)
 
     def _execute_request(

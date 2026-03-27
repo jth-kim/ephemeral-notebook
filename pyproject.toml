@@ -3,7 +3,7 @@ requires = ["hatchling>=1.24.2"]
 build-backend = "hatchling.build"
 
 [project]
-name = "popup-notebook"
+name = "ephemeral-notebook"
 version = "0.1.0"
 description = "Terminal-native, notebook-like Python scratchpad for tmux workflows."
 readme = "README.md"
@@ -52,15 +52,16 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/jonathankim/popup-notebook"
-Repository = "https://github.com/jonathankim/popup-notebook"
-Issues = "https://github.com/jonathankim/popup-notebook/issues"
+Homepage = "https://github.com/jonathankim/ephemeral-notebook"
+Repository = "https://github.com/jonathankim/ephemeral-notebook"
+Issues = "https://github.com/jonathankim/ephemeral-notebook/issues"
 
 [project.scripts]
-popup-notebook = "popup_notebook.cli:app"
+ephemeral-notebook = "ephemeral_notebook.cli:app"
+en = "ephemeral_notebook.cli:app"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/popup_notebook"]
+packages = ["src/ephemeral_notebook"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

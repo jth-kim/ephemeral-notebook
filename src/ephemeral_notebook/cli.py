@@ -7,11 +7,11 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from popup_notebook.config import load_app_config
-from popup_notebook.launcher import PopupGeometry, in_tmux, launch_tmux_popup
-from popup_notebook.project import build_project_context
-from popup_notebook.sessions.manager import SessionManager
-from popup_notebook.tui.app import run_tui
+from ephemeral_notebook.config import load_app_config
+from ephemeral_notebook.launcher import PopupGeometry, in_tmux, launch_tmux_popup
+from ephemeral_notebook.project import build_project_context
+from ephemeral_notebook.sessions.manager import SessionManager
+from ephemeral_notebook.tui.app import run_tui
 
 app = typer.Typer(no_args_is_help=True, help="Notebook-like terminal scratchpad for Python.")
 console = Console()
@@ -27,7 +27,7 @@ def status(
     manager = SessionManager()
     context = build_project_context(cwd)
     session_status = manager.status(context.project_root)
-    table = Table(title="popup-notebook status")
+    table = Table(title="ephemeral-notebook status")
     table.add_column("Field")
     table.add_column("Value", overflow="fold")
     table.add_row("cwd", str(context.cwd))
@@ -131,7 +131,7 @@ def _prepare_key_debug(cwd: Path) -> None:
 
 def _enable_key_debug() -> None:
     os.environ["TEXTUAL_DEBUG"] = "1"
-    os.environ["POPUP_NOTEBOOK_KEY_DEBUG"] = "1"
+    os.environ["EPHEMERAL_NOTEBOOK_KEY_DEBUG"] = "1"
 
 
 if __name__ == "__main__":

@@ -6,7 +6,7 @@ import unittest
 from textual import events
 from textual.widgets._text_area import Selection
 
-from popup_notebook.tui.widgets.cell import NotebookTextArea, _pretty_repr_text
+from ephemeral_notebook.tui.widgets.cell import NotebookTextArea, _pretty_repr_text
 
 
 class NotebookTextAreaTests(unittest.TestCase):

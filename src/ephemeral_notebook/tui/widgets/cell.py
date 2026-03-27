@@ -15,7 +15,7 @@ from textual.reactive import reactive
 from textual.widgets import Markdown, Static, TextArea
 from textual.widgets._text_area import Selection
 
-from popup_notebook.sessions.models import Cell
+from ephemeral_notebook.sessions.models import Cell
 
 RUN_CELL_KEYS = ("ctrl+r",)
 SELECTION_BG = "#4b6a8a"
@@ -606,7 +606,7 @@ class CellWidget(VerticalGroup):
         if base_theme is None:
             return base_name
         derived_theme = TextAreaTheme(
-            name=f"{base_name}-popup-notebook",
+            name=f"{base_name}-ephemeral-notebook",
             base_style=base_theme.base_style,
             gutter_style=base_theme.gutter_style,
             cursor_style=base_theme.cursor_style,

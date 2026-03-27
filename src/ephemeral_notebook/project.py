@@ -69,7 +69,7 @@ def build_project_context(start: Path) -> ProjectContext:
 
 
 def load_project_notebook_settings(project_root: Path) -> ProjectNotebookSettings:
-    """Load popup-notebook project settings from pyproject.toml when present."""
+    """Load ephemeral-notebook project settings from pyproject.toml when present."""
     pyproject_path = project_root / "pyproject.toml"
     if not pyproject_path.exists():
         return ProjectNotebookSettings()
@@ -82,7 +82,7 @@ def load_project_notebook_settings(project_root: Path) -> ProjectNotebookSetting
     tool_section = payload.get("tool", {})
     if not isinstance(tool_section, dict):
         return ProjectNotebookSettings()
-    notebook_section = tool_section.get("popup-notebook", {})
+    notebook_section = tool_section.get("ephemeral-notebook", {})
     if not isinstance(notebook_section, dict):
         return ProjectNotebookSettings()
 

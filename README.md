@@ -1,8 +1,8 @@
-# popup-notebook
+# ephemeral-notebook
 
 A terminal-native, notebook-like Python scratchpad that lives inside a tmux popup.
 
-Write exploratory Python the way you would in Jupyter, but without leaving your terminal. popup-notebook gives you a lightweight notebook UI with cells, execution, and output — all inside a tmux popup that floats over your current work and preserves state between opens.
+Write exploratory Python the way you would in Jupyter, but without leaving your terminal. ephemeral-notebook gives you a lightweight notebook UI with cells, execution, and output — all inside a tmux popup that floats over your current work and preserves state between opens.
 
 ## Features
 
@@ -17,7 +17,7 @@ Write exploratory Python the way you would in Jupyter, but without leaving your 
 - **Clipboard support** — copy cell source (`cc`) or output (`co`) to system clipboard
 - **Per-project sessions** — each project root gets its own notebook and kernel
 - **Per-project startup** — configure auto-imports and startup code in `pyproject.toml`
-- **Configurable** — popup size, theme, output limits, and more via `~/.config/popup-notebook/config.toml`
+- **Configurable** — popup size, theme, output limits, and more via `~/.config/ephemeral-notebook/config.toml`
 
 ## Requirements
 
@@ -27,14 +27,14 @@ Write exploratory Python the way you would in Jupyter, but without leaving your 
 ## Installation
 
 ```bash
-pip install popup-notebook
+pip install ephemeral-notebook
 ```
 
 Or install from source:
 
 ```bash
-git clone https://github.com/jonathankim/popup-notebook.git
-cd popup-notebook
+git clone https://github.com/jonathankim/ephemeral-notebook.git
+cd ephemeral-notebook
 pip install -e .
 ```
 
@@ -43,7 +43,7 @@ pip install -e .
 From any tmux session:
 
 ```bash
-popup-notebook open
+ephemeral-notebook open
 ```
 
 This opens a floating popup with a blank Python cell. Start typing, hit `Shift+Enter` to run, and `Ctrl+Q` to dismiss. Reopen with the same command — your cells and kernel are still there.
@@ -51,7 +51,7 @@ This opens a floating popup with a blank Python cell. Start typing, hit `Shift+E
 Without tmux, the notebook runs as a full-screen TUI:
 
 ```bash
-popup-notebook open --cwd /path/to/project
+ephemeral-notebook open --cwd /path/to/project
 ```
 
 ## Keybindings
@@ -94,18 +94,18 @@ popup-notebook open --cwd /path/to/project
 ## CLI commands
 
 ```
-popup-notebook open          # Open the notebook UI
-popup-notebook status        # Show project, interpreter, kernel, and session info
-popup-notebook reset         # Restart the kernel (keep cells)
-popup-notebook hard-reset    # Clear all cells and restart kernel
-popup-notebook kill          # Destroy the session entirely
+ephemeral-notebook open          # Open the notebook UI
+ephemeral-notebook status        # Show project, interpreter, kernel, and session info
+ephemeral-notebook reset         # Restart the kernel (keep cells)
+ephemeral-notebook hard-reset    # Clear all cells and restart kernel
+ephemeral-notebook kill          # Destroy the session entirely
 ```
 
 ## Configuration
 
 ### Global config
 
-Optional settings at `~/.config/popup-notebook/config.toml` (or `$XDG_CONFIG_HOME/popup-notebook/config.toml`):
+Optional settings at `~/.config/ephemeral-notebook/config.toml` (or `$XDG_CONFIG_HOME/ephemeral-notebook/config.toml`):
 
 ```toml
 [popup]
@@ -127,7 +127,7 @@ code_theme = "monokai"
 Add to your project's `pyproject.toml`:
 
 ```toml
-[tool.popup-notebook]
+[tool.ephemeral-notebook]
 startup_imports = ["numpy as np", "pandas as pd"]
 startup = ["from pathlib import Path"]
 ```
@@ -136,15 +136,15 @@ startup = ["from pathlib import Path"]
 
 ## How it works
 
-popup-notebook resolves your project root (via `pyproject.toml` or `.git`) and Python interpreter (project `.venv`, ancestor `.venv`, or system `python3`). It starts an IPython kernel as a background process and persists session state to `~/.local/state/popup-notebook/`. The kernel survives popup close/reopen — only `kill` or `hard-reset` stops it.
+ephemeral-notebook resolves your project root (via `pyproject.toml` or `.git`) and Python interpreter (project `.venv`, ancestor `.venv`, or system `python3`). It starts an IPython kernel as a background process and persists session state to `~/.local/state/ephemeral-notebook/`. The kernel survives popup close/reopen — only `kill` or `hard-reset` stops it.
 
 The TUI is built with [Textual](https://github.com/Textualize/textual) and communicates with the kernel via Jupyter's messaging protocol. Output rendering uses [Rich](https://github.com/Textualize/rich).
 
 ## Development
 
 ```bash
-git clone https://github.com/jonathankim/popup-notebook.git
-cd popup-notebook
+git clone https://github.com/jonathankim/ephemeral-notebook.git
+cd ephemeral-notebook
 pip install -e ".[dev]"
 pytest
 ruff check src/ tests/

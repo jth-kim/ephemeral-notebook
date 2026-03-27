@@ -1,16 +1,15 @@
 from __future__ import annotations
 
+import sys
 import tempfile
 import unittest
 from contextlib import contextmanager
 from pathlib import Path
-import sys
 from unittest.mock import patch
 
 from popup_notebook.project import ProjectContext
 from popup_notebook.sessions.manager import SessionAttachedError, SessionManager
 from popup_notebook.sessions.store import save_session_state
-
 
 REPO_PYTHON = Path(__file__).resolve().parents[1] / ".venv" / "bin" / "python"
 
@@ -168,7 +167,11 @@ class SessionManagerTests(unittest.TestCase):
                     inserted = manager.insert_cell_after(project.resolve(), cell_id)
                     self.assertIsNotNone(inserted)
                     assert inserted is not None
-                    self.assertTrue(manager.set_cell_kind(project.resolve(), inserted.id, "markdown"))
+                    self.assertTrue(
+                        manager.set_cell_kind(
+                            project.resolve(), inserted.id, "markdown"
+                        )
+                    )
 
                     updated = manager.get(project.resolve())
                     self.assertIsNotNone(updated)
@@ -191,12 +194,18 @@ class SessionManagerTests(unittest.TestCase):
                     session, token = manager.attach(project)
                     first_id = session.cells[0].id
                     second = manager.insert_cell_after(project.resolve(), first_id)
-                    third = manager.insert_cell_after(project.resolve(), second.id if second else None)
+                    third = manager.insert_cell_after(
+                        project.resolve(), second.id if second else None
+                    )
                     assert second is not None
                     assert third is not None
 
                     manager.update_cell_source(project.resolve(), first_id, "value = 10\nvalue")
-                    manager.update_cell_source(project.resolve(), second.id, "raise RuntimeError('boom')")
+                    manager.update_cell_source(
+                        project.resolve(),
+                        second.id,
+                        "raise RuntimeError('boom')",
+                    )
                     manager.update_cell_source(project.resolve(), third.id, "value + 5")
 
                     result = manager.execute_cells(
@@ -228,7 +237,9 @@ class SessionManagerTests(unittest.TestCase):
                     cell_id = session.cells[0].id
                     manager.update_cell_source(project.resolve(), cell_id, "1 + 1")
 
-                    with patch("popup_notebook.sessions.manager.KernelController.bootstrap") as bootstrap:
+                    with patch(
+                        "popup_notebook.sessions.manager.KernelController.bootstrap"
+                    ) as bootstrap:
                         bootstrap.return_value = None
                         manager.execute_cell(project.resolve(), cell_id)
                         manager.execute_cell(project.resolve(), cell_id)

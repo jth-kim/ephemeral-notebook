@@ -4,7 +4,6 @@ import inspect
 import json
 import textwrap
 
-
 BOOTSTRAP_VERSION = 3
 
 
@@ -15,7 +14,7 @@ def _pn_is_number(value):
         number = float(value)
     except Exception:
         return False
-    return math.isfinite(number)
+    return math.isfinite(number)  # noqa: F821 — runs inside kernel where math is imported
 
 
 def _pn_clip(value, max_width=24):

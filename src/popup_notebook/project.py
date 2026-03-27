@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import sys
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from shutil import which
-import sys
-import tomllib
 
 
 @dataclass(frozen=True)

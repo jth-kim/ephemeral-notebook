@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 PRIMARY_BINDINGS = {
     "a": "insert_above",
     "b": "insert_below",

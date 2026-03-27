@@ -1,72 +1,155 @@
 # popup-notebook
 
-Terminal-native, notebook-like Python scratchpad for tmux workflows.
+A terminal-native, notebook-like Python scratchpad that lives inside a tmux popup.
 
-## Status
+Write exploratory Python the way you would in Jupyter, but without leaving your terminal. popup-notebook gives you a lightweight notebook UI with cells, execution, and output — all inside a tmux popup that floats over your current work and preserves state between opens.
 
-This repository currently contains:
+## Features
 
-- product brief
-- v1 spec
-- implementation plan
-- initial Python project scaffold
+- **tmux popup integration** — opens as a floating overlay, dismisses with `Ctrl+Q`, and picks up where you left off
+- **Real IPython kernel** — full Python execution with the same kernel kept alive across popup sessions
+- **Vim-style navigation** — `j`/`k`/`g`/`G` in nav mode, `Enter` to edit, `Escape` to return
+- **Cell operations** — insert (`a`/`b`), delete (`dd`), undo (`z`), convert between Python and Markdown (`y`/`m`)
+- **Run controls** — run cell (`Shift+Enter`), run all (`rr`), run above (`ra`), run below (`rb`)
+- **Tab completion** — kernel-powered completions with builtin fallback
+- **Smart editing** — auto-indent after `:`, bracket pairing, syntax highlighting
+- **DataFrame rendering** — pandas DataFrames and Series display as formatted terminal tables
+- **Clipboard support** — copy cell source (`cc`) or output (`co`) to system clipboard
+- **Per-project sessions** — each project root gets its own notebook and kernel
+- **Per-project startup** — configure auto-imports and startup code in `pyproject.toml`
+- **Configurable** — popup size, theme, output limits, and more via `~/.config/popup-notebook/config.toml`
 
-## Intended stack
+## Requirements
 
-- Python
-- Textual
-- Rich
-- Typer
-- jupyter_client
-- ipykernel
-- uv
+- Python 3.11+
+- tmux (for popup mode; works without tmux as a standalone TUI)
 
-## Planned CLI
+## Installation
 
-- `popup-notebook open`
-- `popup-notebook reset`
-- `popup-notebook hard-reset`
-- `popup-notebook kill`
-- `popup-notebook status`
+```bash
+pip install popup-notebook
+```
 
-## Development
+Or install from source:
 
-This scaffold is intentionally light. The first implemented behavior is project root and Python interpreter resolution.
+```bash
+git clone https://github.com/jonathankim/popup-notebook.git
+cd popup-notebook
+pip install -e .
+```
 
-## Global Config
+## Quick start
 
-Optional global settings live at `~/.config/popup-notebook/config.toml` or under `XDG_CONFIG_HOME`.
+From any tmux session:
 
-Example:
+```bash
+popup-notebook open
+```
+
+This opens a floating popup with a blank Python cell. Start typing, hit `Shift+Enter` to run, and `Ctrl+Q` to dismiss. Reopen with the same command — your cells and kernel are still there.
+
+Without tmux, the notebook runs as a full-screen TUI:
+
+```bash
+popup-notebook open --cwd /path/to/project
+```
+
+## Keybindings
+
+### Nav mode (default)
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Enter edit mode on current cell |
+| `a` / `b` | Insert cell above / below |
+| `dd` | Delete current cell |
+| `z` | Undo last delete |
+| `y` / `m` | Convert cell to Python / Markdown |
+| `Shift+Enter`, `R` | Run cell and move to next |
+| `Ctrl+R` | Run cell and stay |
+| `rr` | Run all cells |
+| `ra` / `rb` | Run all above / below |
+| `o` | Toggle output expand/collapse |
+| `xx` | Clear current cell output |
+| `cc` / `co` | Copy cell source / output |
+| `l` | Toggle line numbers |
+| `ii` | Interrupt kernel |
+| `00` | Restart kernel |
+| `dx` | Hard reset (clear all + restart) |
+| `Up` / `Down`, `j` / `k` | Move between cells |
+| `gg` / `G` | Jump to first / last cell |
+| `Ctrl+U` / `Ctrl+D` | Page up / down |
+| `Ctrl+Q`, `q` | Close popup (session stays alive) |
+
+### Edit mode
+
+| Key | Action |
+|-----|--------|
+| `Escape` | Return to nav mode |
+| `Shift+Enter` | Run cell and move to next |
+| `Ctrl+R` | Run cell and stay |
+| `Tab` | Complete or indent |
+| `Up` / `Down` | Move cursor; at boundary, move to adjacent cell |
+
+## CLI commands
+
+```
+popup-notebook open          # Open the notebook UI
+popup-notebook status        # Show project, interpreter, kernel, and session info
+popup-notebook reset         # Restart the kernel (keep cells)
+popup-notebook hard-reset    # Clear all cells and restart kernel
+popup-notebook kill          # Destroy the session entirely
+```
+
+## Configuration
+
+### Global config
+
+Optional settings at `~/.config/popup-notebook/config.toml` (or `$XDG_CONFIG_HOME/popup-notebook/config.toml`):
 
 ```toml
 [popup]
-width = "88%"
-height = "88%"
+width = "92%"
+height = "92%"
 x = "C"
 y = "C"
 
 [ui]
 show_footer = true
-status_verbosity = "minimal"
+status_verbosity = "minimal"   # "minimal" or "full"
 markdown_center = false
 output_max_lines = 12
 code_theme = "monokai"
 ```
 
-## Project Startup
+### Per-project startup
 
-Per-project startup behavior can live in `pyproject.toml`:
+Add to your project's `pyproject.toml`:
 
 ```toml
 [tool.popup-notebook]
 startup_imports = ["numpy as np", "pandas as pd"]
-startup = ["from math import sqrt"]
+startup = ["from pathlib import Path"]
 ```
 
-`startup_imports` expands to normal Python `import ...` statements. `startup` accepts arbitrary Python lines.
+`startup_imports` expands to `import ...` statements. `startup` accepts arbitrary Python lines. Both run once when the kernel bootstraps.
 
-## Built-in Formatting
+## How it works
 
-When `pandas` is available in the resolved interpreter, popup-notebook installs text/plain
-formatters so `DataFrame` and `Series` outputs render as terminal-friendly tables by default.
+popup-notebook resolves your project root (via `pyproject.toml` or `.git`) and Python interpreter (project `.venv`, ancestor `.venv`, or system `python3`). It starts an IPython kernel as a background process and persists session state to `~/.local/state/popup-notebook/`. The kernel survives popup close/reopen — only `kill` or `hard-reset` stops it.
+
+The TUI is built with [Textual](https://github.com/Textualize/textual) and communicates with the kernel via Jupyter's messaging protocol. Output rendering uses [Rich](https://github.com/Textualize/rich).
+
+## Development
+
+```bash
+git clone https://github.com/jonathankim/popup-notebook.git
+cd popup-notebook
+pip install -e ".[dev]"
+pytest
+ruff check src/ tests/
+```
+
+## License
+
+MIT

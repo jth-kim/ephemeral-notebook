@@ -13,13 +13,16 @@ from popup_notebook.project import build_project_context
 from popup_notebook.sessions.manager import SessionManager
 from popup_notebook.tui.app import run_tui
 
-
 app = typer.Typer(no_args_is_help=True, help="Notebook-like terminal scratchpad for Python.")
 console = Console()
 
 
 @app.command()
-def status(cwd: Path = typer.Option(Path.cwd(), "--cwd", help="Working directory to inspect.")) -> None:
+def status(
+    cwd: Path = typer.Option(
+        Path.cwd(), "--cwd", help="Working directory to inspect."
+    ),
+) -> None:
     """Show the resolved project and interpreter."""
     manager = SessionManager()
     context = build_project_context(cwd)
@@ -79,7 +82,11 @@ def ui(
 
 
 @app.command()
-def reset(cwd: Path = typer.Option(Path.cwd(), "--cwd", help="Working directory to reset.")) -> None:
+def reset(
+    cwd: Path = typer.Option(
+        Path.cwd(), "--cwd", help="Working directory to reset."
+    ),
+) -> None:
     """Restart kernel state while preserving notebook structure."""
     manager = SessionManager()
     context = build_project_context(cwd)
@@ -90,7 +97,11 @@ def reset(cwd: Path = typer.Option(Path.cwd(), "--cwd", help="Working directory 
 
 
 @app.command("hard-reset")
-def hard_reset(cwd: Path = typer.Option(Path.cwd(), "--cwd", help="Working directory to hard reset.")) -> None:
+def hard_reset(
+    cwd: Path = typer.Option(
+        Path.cwd(), "--cwd", help="Working directory to hard reset."
+    ),
+) -> None:
     """Clear notebook contents and recreate a blank notebook."""
     manager = SessionManager()
     context = build_project_context(cwd)

@@ -1,19 +1,23 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterable
 
 from popup_notebook.config import load_app_config
 from popup_notebook.project import build_project_context
 from popup_notebook.sessions.kernel import CompletionResult, LiveKernelClient
-from popup_notebook.sessions.manager import BatchExecutionResult, SessionAttachedError, SessionManager
+from popup_notebook.sessions.manager import (
+    BatchExecutionResult,
+    SessionAttachedError,
+    SessionManager,
+)
 from popup_notebook.sessions.models import Cell
 from popup_notebook.tui.notebook import NotebookViewModel
 from popup_notebook.tui.widgets.cell import (
@@ -49,8 +53,7 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
     """Run the Textual app if available."""
     key_debug = key_debug or os.environ.get("POPUP_NOTEBOOK_KEY_DEBUG") == "1"
     try:
-        from textual.app import App, ComposeResult
-        from textual.app import SystemCommand
+        from textual.app import App, ComposeResult, SystemCommand
         from textual.binding import Binding
         from textual.containers import VerticalScroll
         from textual.screen import Screen
@@ -352,7 +355,11 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
                 return
             self.model.reload()
             cell = next(
-                (cell for cell in self.model.session.cells if cell.id == self.model.current_cell_id),
+                (
+                    cell
+                    for cell in self.model.session.cells
+                    if cell.id == self.model.current_cell_id
+                ),
                 None,
             )
             if cell is None:
@@ -365,7 +372,11 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
                 return
             self.model.reload()
             cell = next(
-                (cell for cell in self.model.session.cells if cell.id == self.model.current_cell_id),
+                (
+                    cell
+                    for cell in self.model.session.cells
+                    if cell.id == self.model.current_cell_id
+                ),
                 None,
             )
             if cell is None or not cell.output.strip():
@@ -733,7 +744,11 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
                 return
 
             insert_index = next(
-                (index for index, item in enumerate(self.model.session.cells) if item.id == cell_id),
+                (
+                    index
+                    for index, item in enumerate(self.model.session.cells)
+                    if item.id == cell_id
+                ),
                 None,
             )
             if insert_index is None:
@@ -775,7 +790,8 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
                 widget.set_edit_mode(cell.id == self.model.current_cell_id and self.edit_mode)
                 widget.set_show_line_numbers(cell.id in self._line_number_cells)
                 widget.set_running(
-                    self._pending_execution is not None and cell.id == self._pending_execution.cell_id
+                    self._pending_execution is not None
+                    and cell.id == self._pending_execution.cell_id
                 )
                 widget.sync_from_cell(cell)
 
@@ -787,7 +803,10 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
         def _apply_widget_state(self, *, refocus: bool = True) -> None:
             for widget in self.query(CellWidget):
                 widget.set_current(widget.cell.id == self.model.current_cell_id)
-                widget.set_edit_mode(widget.cell.id == self.model.current_cell_id and self.edit_mode)
+                widget.set_edit_mode(
+                    widget.cell.id == self.model.current_cell_id
+                    and self.edit_mode
+                )
                 widget.set_show_line_numbers(widget.cell.id in self._line_number_cells)
                 widget.set_running(
                     self._pending_execution is not None
@@ -1038,7 +1057,9 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
 
             next_id = self._next_cell_id(pending_execution.cell_id)
             if next_id is None:
-                new_cell = manager.insert_cell_after(context.project_root, pending_execution.cell_id)
+                new_cell = manager.insert_cell_after(
+                    context.project_root, pending_execution.cell_id
+                )
                 if new_cell is None:
                     self._apply_widget_state()
                     return
@@ -1055,9 +1076,12 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
             position = current_index + 1 if current_index >= 0 else 0
             total = len(self.model.session.cells)
             generation = self.model.session.kernel_generation
-            pending = f"Pending: {self._pending_nav_sequence}" if self._pending_nav_sequence else None
+            pending = (
+                f"Pending: {self._pending_nav_sequence}"
+                if self._pending_nav_sequence
+                else None
+            )
             location = context.project_root.name or str(context.project_root)
-            interpreter = context.interpreter.name
             running = self._pending_execution.label if self._pending_execution is not None else None
             kernel_action = self._pending_kernel_action
             if config.ui.status_verbosity == "full":
@@ -1135,7 +1159,9 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
             commands = [
                 (
                     "Shortcut: Run and move",
-                    "Ctrl+R in nav or edit mode, or R in nav mode. Executes the selected cell and moves down, creating a new cell if needed.",
+                    "Ctrl+R in nav or edit mode, or R in nav mode. "
+                    "Executes the selected cell and moves down, "
+                    "creating a new cell if needed.",
                 ),
                 (
                     "Shortcut: Enter edit mode",
@@ -1155,11 +1181,13 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
                 ),
                 (
                     "Shortcut: Delete and restore",
-                    "dd deletes the current cell and z restores the most recently deleted cell in nav mode.",
+                    "dd deletes the current cell and z restores "
+                    "the most recently deleted cell in nav mode.",
                 ),
                 (
                     "Shortcut: Copy current cell",
-                    "cc copies the current cell source and co copies the current output in nav mode.",
+                    "cc copies the current cell source and "
+                    "co copies the current output in nav mode.",
                 ),
                 (
                     "Shortcut: Toggle output",
@@ -1171,7 +1199,8 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
                 ),
                 (
                     "Shortcut: Run ranges",
-                    "rr runs all cells, ra runs all above, and rb runs the selected cell and everything below.",
+                    "rr runs all cells, ra runs all above, and rb runs "
+                    "the selected cell and everything below.",
                 ),
                 (
                     "Shortcut: Clear output",
@@ -1179,11 +1208,15 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
                 ),
                 (
                     "Shortcut: Kernel control",
-                    "ii interrupts the kernel, 00 restarts it, and dx clears the notebook and restarts the kernel in nav mode.",
+                    "ii interrupts the kernel, 00 restarts it, and "
+                    "dx clears the notebook and restarts the "
+                    "kernel in nav mode.",
                 ),
                 (
                     "Shortcut: Navigate cells",
-                    "Up and down move between cells in nav mode. PageUp, PageDown, Ctrl+U, Ctrl+D, Home, and End scroll the notebook.",
+                    "Up and down move between cells in nav mode. "
+                    "PageUp, PageDown, Ctrl+U, Ctrl+D, Home, "
+                    "and End scroll the notebook.",
                 ),
                 (
                     "Shortcut: Hide popup",
@@ -1191,11 +1224,17 @@ def run_tui(cwd: Path, *, key_debug: bool = False) -> None:
                 ),
                 (
                     "Config: Global config file",
-                    "Global settings live in ~/.config/popup-notebook/config.toml or XDG_CONFIG_HOME.",
+                    "Global settings live in "
+                    "~/.config/popup-notebook/config.toml "
+                    "or XDG_CONFIG_HOME.",
                 ),
             ]
             for title, help_text in commands:
-                yield SystemCommand(title, help_text, lambda message=help_text: self.notify(message))
+                yield SystemCommand(
+                    title,
+                    help_text,
+                    lambda message=help_text: self.notify(message),
+                )
 
         def _queue_palette_action(self, action, name: str) -> None:
             self.run_worker(

@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
-
 CellKind = Literal["python", "markdown"]
 
 
@@ -83,7 +82,9 @@ class SessionState:
             kernel_generation=int(data.get("kernel_generation", 1)),
             kernel_pid=int(data["kernel_pid"]) if data.get("kernel_pid") is not None else None,
             connection_file=(
-                Path(str(data["connection_file"])) if data.get("connection_file") is not None else None
+                Path(str(data["connection_file"]))
+                if data.get("connection_file") is not None
+                else None
             ),
             connection_info=(
                 dict(data["connection_info"])
@@ -96,7 +97,9 @@ class SessionState:
                 else None
             ),
             bootstrap_version=(
-                int(data["bootstrap_version"]) if data.get("bootstrap_version") is not None else None
+                int(data["bootstrap_version"])
+                if data.get("bootstrap_version") is not None
+                else None
             ),
             attached=bool(data.get("attached", False)),
             attachment_token=(

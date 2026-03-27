@@ -7,7 +7,6 @@ from unittest.mock import patch
 
 from popup_notebook.sessions.kernel import KernelController, LiveKernelClient
 
-
 REPO_PYTHON = Path(__file__).resolve().parents[1] / ".venv" / "bin" / "python"
 
 

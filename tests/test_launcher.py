@@ -3,8 +3,8 @@ from __future__ import annotations
 import os
 import sys
 import unittest
-from subprocess import CompletedProcess
 from pathlib import Path
+from subprocess import CompletedProcess
 from unittest.mock import call, patch
 
 from popup_notebook.launcher import PopupGeometry, configure_tmux_keyboard, tmux_popup_command

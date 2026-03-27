@@ -3,8 +3,8 @@ from __future__ import annotations
 import asyncio
 import unittest
 
-from textual.widgets._text_area import Selection
 from textual import events
+from textual.widgets._text_area import Selection
 
 from popup_notebook.tui.widgets.cell import NotebookTextArea, _pretty_repr_text
 

@@ -5,15 +5,15 @@ import keyword
 import re
 import textwrap
 
-from rich.text import Text
 from rich.style import Style
+from rich.text import Text
 from textual import events
 from textual._text_area_theme import TextAreaTheme
 from textual.containers import VerticalGroup
 from textual.message import Message
 from textual.reactive import reactive
-from textual.widgets._text_area import Selection
 from textual.widgets import Markdown, Static, TextArea
+from textual.widgets._text_area import Selection
 
 from popup_notebook.sessions.models import Cell
 

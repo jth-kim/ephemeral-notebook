@@ -13,8 +13,11 @@ from queue import Empty
 from typing import Final
 
 from popup_notebook.sessions.bootstrap import build_bootstrap_code
-from popup_notebook.sessions.store import session_connection_path, session_log_path, session_store_dir
-
+from popup_notebook.sessions.store import (
+    session_connection_path,
+    session_log_path,
+    session_store_dir,
+)
 
 STARTUP_TIMEOUT: Final[float] = 10.0
 EXECUTION_TIMEOUT: Final[float] = 60.0
@@ -144,7 +147,11 @@ class LiveKernelClient:
                 raise
 
         content = reply.get("content", {})
-        matches = tuple(str(match) for match in content.get("matches", []) if isinstance(match, str))
+        matches = tuple(
+            str(match)
+            for match in content.get("matches", [])
+            if isinstance(match, str)
+        )
         cursor_start = int(content.get("cursor_start", cursor_pos))
         cursor_end = int(content.get("cursor_end", cursor_pos))
         return CompletionResult(
@@ -439,11 +446,15 @@ class KernelController:
                     success = False
                     traceback = content.get("traceback", [])
                     if traceback:
-                        outputs.append(_clean_output_text("\n".join(str(line) for line in traceback)))
+                        joined = "\n".join(
+                            str(line) for line in traceback
+                        )
+                        outputs.append(_clean_output_text(joined))
                     else:
                         outputs.append(
                             _clean_output_text(
-                                f"{content.get('ename', 'Error')}: {content.get('evalue', '')}".rstrip()
+                                f"{content.get('ename', 'Error')}: "
+                                f"{content.get('evalue', '')}".rstrip()
                             )
                         )
                 elif msg_type == "status" and content.get("execution_state") == "idle":

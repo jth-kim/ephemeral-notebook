@@ -16,6 +16,7 @@ from popup_notebook.sessions.store import (
     session_state_path,
 )
 
+
 class SessionAttachedError(RuntimeError):
     """Raised when a session already has an active UI attachment."""
 
@@ -320,7 +321,11 @@ class SessionManager:
             if session is None:
                 return []
             cells = {cell.id: cell for cell in session.cells if cell.id in cell_ids}
-            return [Cell.from_dict(cells[cell_id].to_dict()) for cell_id in cell_ids if cell_id in cells]
+            return [
+                Cell.from_dict(cells[cell_id].to_dict())
+                for cell_id in cell_ids
+                if cell_id in cells
+            ]
 
     def persist_execution_result(
         self,
@@ -541,7 +546,11 @@ class SessionManager:
                 session.cells.append(new_cell)
             else:
                 index = next(
-                    (position for position, cell in enumerate(session.cells) if cell.id == reference_cell_id),
+                    (
+                        position
+                        for position, cell in enumerate(session.cells)
+                        if cell.id == reference_cell_id
+                    ),
                     None,
                 )
                 if index is None:

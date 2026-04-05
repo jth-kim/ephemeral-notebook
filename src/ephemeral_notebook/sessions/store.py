@@ -57,8 +57,14 @@ def load_session_state(project_root: Path) -> SessionState | None:
     path = session_state_path(project_root)
     if not path.exists():
         return None
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    return SessionState.from_dict(payload)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("Session payload must be a JSON object.")
+        return SessionState.from_dict(payload)
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        _quarantine_corrupted_state(path)
+        return None
 
 
 def save_session_state(session: SessionState) -> Path:
@@ -77,3 +83,14 @@ def delete_session_state(project_root: Path) -> None:
     for child in session_dir.iterdir():
         child.unlink()
     session_dir.rmdir()
+
+
+def _quarantine_corrupted_state(path: Path) -> None:
+    for attempt in range(100):
+        suffix = ".corrupt" if attempt == 0 else f".corrupt.{attempt}"
+        destination = path.with_name(f"{path.name}{suffix}")
+        try:
+            path.replace(destination)
+            return
+        except OSError:
+            continue

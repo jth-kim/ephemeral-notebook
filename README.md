@@ -94,6 +94,7 @@ ephemeral-notebook open --cwd /path/to/project
 ## CLI commands
 
 ```
+ephemeral-notebook --version     # Show the installed version
 ephemeral-notebook open          # Open the notebook UI
 ephemeral-notebook status        # Show project, interpreter, kernel, and session info
 ephemeral-notebook reset         # Restart the kernel (keep cells)

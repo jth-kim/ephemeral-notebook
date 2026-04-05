@@ -53,15 +53,24 @@ dev = [
 
 [project.urls]
 Homepage = "https://github.com/jonathankim/ephemeral-notebook"
+Documentation = "https://github.com/jonathankim/ephemeral-notebook#readme"
 Repository = "https://github.com/jonathankim/ephemeral-notebook"
 Issues = "https://github.com/jonathankim/ephemeral-notebook/issues"
 
 [project.scripts]
 ephemeral-notebook = "ephemeral_notebook.cli:app"
-en = "ephemeral_notebook.cli:app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ephemeral_notebook"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/src",
+  "/tests",
+  "/README.md",
+  "/LICENSE",
+  "/pyproject.toml",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

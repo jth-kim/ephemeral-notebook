@@ -27,16 +27,20 @@ Write exploratory Python the way you would in Jupyter, but without leaving your 
 ## Installation
 
 ```bash
-pip install ephemeral-notebook
-```
-
-Or install from source:
-
-```bash
-git clone https://github.com/jonathankim/ephemeral-notebook.git
+git clone https://github.com/jth-kim/ephemeral-notebook.git
 cd ephemeral-notebook
 pip install -e .
 ```
+
+Then bind it to a tmux popup — add to your `~/.tmux.conf`:
+
+```tmux
+bind-key -T popup 'p' display-popup -EE -w60% -h95% -xC -yC \
+  -d "#{pane_current_path}" \
+  "/path/to/ephemeral-notebook/.venv/bin/ephemeral-notebook ui --cwd '#{pane_current_path}'"
+```
+
+Reload with `tmux source-file ~/.tmux.conf`. Hit your popup-table prefix + `p` to open.
 
 ## Quick start
 
@@ -144,7 +148,7 @@ The TUI is built with [Textual](https://github.com/Textualize/textual) and commu
 ## Development
 
 ```bash
-git clone https://github.com/jonathankim/ephemeral-notebook.git
+git clone https://github.com/jth-kim/ephemeral-notebook.git
 cd ephemeral-notebook
 pip install -e ".[dev]"
 pytest

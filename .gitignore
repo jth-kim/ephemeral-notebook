@@ -8,7 +8,4 @@ build/
 *.egg-info/
 keys.log
 llm-ops-kit/
-implementation_plan.md
-terminal_scratchpad_brief.md
-terminal_scratchpad_v1_spec.md
 .claude/

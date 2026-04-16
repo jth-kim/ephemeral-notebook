@@ -52,10 +52,10 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/jonathankim/ephemeral-notebook"
-Documentation = "https://github.com/jonathankim/ephemeral-notebook#readme"
-Repository = "https://github.com/jonathankim/ephemeral-notebook"
-Issues = "https://github.com/jonathankim/ephemeral-notebook/issues"
+Homepage = "https://github.com/jth-kim/ephemeral-notebook"
+Documentation = "https://github.com/jth-kim/ephemeral-notebook#readme"
+Repository = "https://github.com/jth-kim/ephemeral-notebook"
+Issues = "https://github.com/jth-kim/ephemeral-notebook/issues"
 
 [project.scripts]
 ephemeral-notebook = "ephemeral_notebook.cli:app"

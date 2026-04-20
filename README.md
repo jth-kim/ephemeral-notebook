@@ -4,6 +4,8 @@ A terminal-native, notebook-like Python scratchpad that lives inside a tmux popu
 
 Write exploratory Python the way you would in Jupyter, but without leaving your terminal. ephemeral-notebook gives you a lightweight notebook UI with cells, execution, and output — all inside a tmux popup that floats over your current work and preserves state between opens.
 
+This utility is a side-project that streamlines the maths work. My stats workflow spans scripts, LLMs, and Jupyter. Everything but the notebook side already lives in the terminal. The cumbersome part is reaching for a full `.ipynb` every time I want to sketch a transform, poke at data, or validate an idea; it leaves cruft, encourages bad habits, and adds friction. ephemeral-notebook collapses that into a one-keystroke floating scratchpad. It's always immediately available, env and project aware, with just enough persistent state to stay useful while staying light enough to not require management.
+
 ## Features
 
 - **tmux popup integration** — opens as a floating overlay, dismisses with `Ctrl+Q`, and picks up where you left off

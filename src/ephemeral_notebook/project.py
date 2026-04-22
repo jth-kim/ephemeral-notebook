@@ -21,7 +21,7 @@ class ProjectNotebookSettings:
 
 
 def resolve_project_root(start: Path) -> Path:
-    """Resolve the project root from the cwd using the v1 rules."""
+    """Resolve the project root from the cwd."""
     start = start.resolve()
 
     pyproject_root = _find_ancestor_with(start, "pyproject.toml")
@@ -36,7 +36,7 @@ def resolve_project_root(start: Path) -> Path:
 
 
 def resolve_interpreter(start: Path, project_root: Path) -> tuple[Path, str]:
-    """Resolve the Python interpreter according to the v1 search order."""
+    """Resolve the Python interpreter for the project."""
     project_venv = project_root / ".venv" / "bin" / "python"
     if project_venv.exists():
         return project_venv, "project .venv"
